@@ -1,7 +1,10 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
+import os
 
-engine = create_engine("postgresql://postgres:1234@localhost:5432/essantial_db",echo=True)
+DATABASE_URL = os.environ["DATABASE_URL"]
+
+engine = create_engine(DATABASE_URL,echo=True)
 
 Base = declarative_base()
 
