@@ -91,3 +91,62 @@ async def get_unit_words(unit_id:int):
         ]
     }
     return jsonable_encoder(custom_data)
+
+
+@word_router.get('favorite-words',status_code=200)
+async def get_favorite_words():
+    
+    words = session.query(Word).filter(Word.isFavorite==True).all()
+
+    custom_data = {
+        'success':True,
+        'code': 200,
+        'message': 'Hammasi yaxshi',
+        'data': [
+            {
+                'id': word.id,
+                "word_en": word.word_en,
+                'word_uz': word.word_uz,
+                'comment': word.comment,
+                'definition': word.definition,
+                'phonetic': word.phonetic,
+                'example': word.example,
+                'word_classes': word.word_classes,
+                'isFavorite': word.isFavorite,
+                'unit_id': word.unit_id
+            }
+            for word in words
+        ]
+    }
+    return jsonable_encoder(custom_data)
+
+@word_router.put('/add-favorite/{id}',status_code=200)
+async def add_favorite_words(id: int):
+    
+    word = session.query(Word).filter(Word.id==id).first()
+    word.isFavorite = not word.isFavorite
+    session.add()
+
+    custom_data = {
+        'success':True,
+        'code': 200,
+        'message': 'Hammasi yaxshi',
+        'data': "Word added to favorites list"
+    }
+    return jsonable_encoder(custom_data)
+
+
+@word_router.put('/add-comment/{id}',status_code=200)
+async def add_favorite_words(id: int,comment: str):
+    
+    word = session.query(Word).filter(Word.id==id).first()
+    word.comment = comment
+    session.add()
+
+    custom_data = {
+        'success':True,
+        'code': 200,
+        'message': 'Hammasi yaxshi',
+        'data': "Comment is added successful"
+    }
+    return jsonable_encoder(custom_data)
