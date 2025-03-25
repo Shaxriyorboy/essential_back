@@ -1,10 +1,7 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
-import os
 
-DATABASE_URL = os.environ["DATABASE_URL"]
-
-engine = create_engine(DATABASE_URL,echo=True)
+engine = create_engine("postgresql://essantial_db_user:vXE5tcxMWN6TcXwGFpCmpLQyw7iN1NZU@dpg-cvgous2n91rc73a7i4a0-a.oregon-postgres.render.com/essantial_db",echo=True)
 
 Base = declarative_base()
 
