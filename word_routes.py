@@ -93,7 +93,7 @@ async def get_unit_words(unit_id:int):
     return jsonable_encoder(custom_data)
 
 
-@word_router.get('favorite-words',status_code=200)
+@word_router.get('/favorite-words',status_code=200)
 async def get_favorite_words():
     
     words = session.query(Word).filter(Word.isFavorite==True).all()
