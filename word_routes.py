@@ -137,7 +137,7 @@ async def add_favorite_words(id: int):
 
 
 @word_router.put('/add-comment/{id}',status_code=200)
-async def add_favorite_words(id: int,comment: str):
+async def add_comment_words(id: int,comment: str):
     
     word = session.query(Word).filter(Word.id==id).first()
     word.comment = comment
