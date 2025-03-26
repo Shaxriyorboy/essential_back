@@ -125,7 +125,7 @@ async def add_favorite_words(id: int):
     
     word = session.query(Word).filter(Word.id==id).first()
     word.isFavorite = not word.isFavorite
-    session.add()
+    session.commit()
 
     custom_data = {
         'success':True,
@@ -141,7 +141,7 @@ async def add_comment_words(id: int,comment: str):
     
     word = session.query(Word).filter(Word.id==id).first()
     word.comment = comment
-    session.add()
+    session.commit()
 
     custom_data = {
         'success':True,
