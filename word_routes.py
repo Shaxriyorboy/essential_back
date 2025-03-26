@@ -96,8 +96,8 @@ async def get_unit_words(unit_id:int):
             'message': 'Bunday idli unit topilmadi',
             'data': None
         }
-    
-    words = session.query(Word).filter(Word.unit_id==unit_id).all()
+
+    words = session.query(Word).order_by(Word.unit_id, Word.id).all()
 
     custom_data = {
         'success':True,
