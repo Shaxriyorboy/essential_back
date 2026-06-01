@@ -57,6 +57,31 @@ async def add_new_word(word: WordModel):
 
     return jsonable_encoder(custom_data)
 
+
+@word_router.delete('/delete-word')
+async def delete_word(id: int):
+    word = session.query(Word).filter(Word.id==id).first()
+
+    if word is None:
+        return {
+            'success':False,
+            'code': 403,
+            'message': 'Bunday idli kitob topilmadi',
+            'data': None
+        }
+
+    session.delete(word)
+    session.commit()
+
+    custom_data = {
+        'success': True,
+        'code': 202,
+        'message': 'Muoffaqiyali o\'chilirdi',
+    }
+
+    return jsonable_encoder(custom_data)
+
+
 @word_router.get('/favorite-words',status_code=200)
 async def get_favorite_words():
     
@@ -97,7 +122,7 @@ async def get_unit_words(unit_id:int):
             'data': None
         }
 
-    words = session.query(Word).order_by(Word.unit_id, Word.id).all()
+    words = session.query(Word).filter(unit.id==Word.unit_id).order_by(Word.unit_id, Word.id).all()
 
     custom_data = {
         'success':True,
@@ -127,6 +152,15 @@ async def get_unit_words(unit_id:int):
 async def add_favorite_words(id: int):
     
     word = session.query(Word).filter(Word.id==id).first()
+
+    if word is None:
+        return {
+            'success': False,
+            'code': 404,
+            'message': 'Bunday idli so\'z topilmadi',
+            'data': None
+        }
+
     word.isFavorite = not word.isFavorite
     session.commit()
 
@@ -143,6 +177,15 @@ async def add_favorite_words(id: int):
 async def add_comment_words(id: int,comment: str):
     
     word = session.query(Word).filter(Word.id==id).first()
+
+    if word is None:
+        return {
+            'success': False,
+            'code': 404,
+            'message': 'Bunday idli so\'z topilmadi',
+            'data': None
+        }
+
     word.comment = comment
     session.commit()
 
@@ -153,3 +196,45 @@ async def add_comment_words(id: int,comment: str):
         'data': "Comment is added successful"
     }
     return jsonable_encoder(custom_data)
+
+
+@word_router.put('/edit-word/{id}', status_code=200)
+async def edit_word(id: int, word: WordModel):
+    word_old = session.query(Word).filter(Word.id == id).first()
+    if word_old is None:
+        return {
+            'success': False,
+            'code': 404,
+            'message': 'Bunday idli so\'z topilmadi',
+            'data': None
+        }
+
+    word_old.word_en = word.word_en
+    word_old.word_uz = word.word_uz
+    word_old.comment = word.comment
+    word_old.definition = word.definition
+    word_old.phonetic = word.phonetic
+    word_old.example = word.example
+    word_old.word_classes = word.word_classes
+    word_old.isFavorite = word.isFavorite
+    if word.unit_id is not None:
+        word_old.unit_id = word.unit_id
+    session.commit()
+
+    return jsonable_encoder({
+        'success': True,
+        'code': 200,
+        'message': 'So\'z muvaffaqiyatli tahrirlandi',
+        'data': {
+            'id': word_old.id,
+            'word_en': word_old.word_en,
+            'word_uz': word_old.word_uz,
+            'comment': word_old.comment,
+            'definition': word_old.definition,
+            'phonetic': word_old.phonetic,
+            'example': word_old.example,
+            'word_classes': word_old.word_classes,
+            'isFavorite': word_old.isFavorite,
+            'unit_id': word_old.unit_id
+        }
+    })

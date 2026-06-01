@@ -1,16 +1,29 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from book_routes import book_router
 from unit_routes import unit_router
 from word_routes import word_router
+from quiz_routes import quiz_router
+from stats_routes import stats_router
 from database import Base, engine
 
 app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 Base.metadata.create_all(bind=engine)
 
 app.include_router(book_router)
 app.include_router(unit_router)
 app.include_router(word_router)
+app.include_router(quiz_router)
+app.include_router(stats_router)
 
 @app.get("/")
 async def root():

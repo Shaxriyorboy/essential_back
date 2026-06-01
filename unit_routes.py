@@ -42,6 +42,7 @@ async def add_book(unit: UnitModel):
             'name': new_unit.name,
             'history': new_unit.history,
             'book_id': new_unit.book_id
+        
         }
     }
 
@@ -73,4 +74,58 @@ async def get_single_unit(book_id: int):
         ]
     }
     return jsonable_encoder(custom_data)
+
+
+@unit_router.put('/edit-unit/{id}', status_code=200)
+async def edit_unit(id: int, unit: UnitModel):
+    unit_old = session.query(Unit).filter(Unit.id == id).first()
+    if unit_old is None:
+        return {
+            'success': False,
+            'code': 404,
+            'message': 'Bunday idli unit topilmadi',
+            'data': None
+        }
+
+    unit_old.name = unit.name
+    unit_old.history = unit.history
+    if unit.book_id is not None:
+        unit_old.book_id = unit.book_id
+    session.commit()
+
+    return jsonable_encoder({
+        'success': True,
+        'code': 200,
+        'message': 'Unit muvaffaqiyatli tahrirlandi',
+        'data': {
+            'id': unit_old.id,
+            'name': unit_old.name,
+            'history': unit_old.history,
+            'book_id': unit_old.book_id
+        }
+    })
+
+
+@unit_router.delete('/delete-unit/{id}', status_code=200)
+async def delete_unit(id: int):
+    unit = session.query(Unit).filter(Unit.id == id).first()
+    if unit is None:
+        return {
+            'success': False,
+            'code': 404,
+            'message': 'Bunday idli unit topilmadi',
+            'data': None
+        }
+
+    # Unitga tegishli barcha so'zlarni ham o'chiramiz (cascade)
+    session.query(Word).filter(Word.unit_id == id).delete()
+    session.delete(unit)
+    session.commit()
+
+    return jsonable_encoder({
+        'success': True,
+        'code': 200,
+        'message': 'Unit va unga tegishli so\'zlar o\'chirildi',
+        'data': None
+    })
 
