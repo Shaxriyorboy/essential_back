@@ -1,15 +1,14 @@
 from typing import List, Optional
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.encoders import jsonable_encoder
+from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from models import Book, Unit, Word
-from database import session, engine
+from database import get_db
 
 data_router = APIRouter(
     prefix='/data'
 )
-
-db = session(bind=engine)
 
 
 # ---------- Import uchun sxemalar ----------
@@ -42,7 +41,7 @@ class ImportPayload(BaseModel):
 
 # ---------- EXPORT ----------
 @data_router.get('/export')
-async def export_data():
+async def export_data(db: Session = Depends(get_db)):
     """Butun bazani JSON ierarxiya ko'rinishida qaytaradi (ID'larsiz)."""
     books = []
     for book in db.query(Book).order_by(Book.id).all():
@@ -79,7 +78,7 @@ async def export_data():
 
 # ---------- IMPORT ----------
 @data_router.post('/import')
-async def import_data(payload: ImportPayload):
+async def import_data(payload: ImportPayload, db: Session = Depends(get_db)):
     """JSON ma'lumotni bazaga yozadi. mode='replace' bo'lsa avval tozalaydi."""
     if payload.mode == 'replace':
         db.query(Word).delete()

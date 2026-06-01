@@ -23,4 +23,16 @@ engine = create_engine(
 
 Base = declarative_base()
 
-session = sessionmaker()
+# Har bir so'rov uchun yangi session yaratuvchi factory
+SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+
+
+def get_db():
+    """FastAPI dependency: har so'rovga alohida session beradi va so'rov
+    tugagach yopadi. Bu global session 'buzilgan transaction' muammosini
+    (bitta xato keyingi barcha so'rovlarni 500 qilishi) hal qiladi."""
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()

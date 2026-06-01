@@ -1,41 +1,40 @@
-from fastapi import APIRouter
-from models import Word,Unit
+from fastapi import APIRouter, Depends
 from fastapi.encoders import jsonable_encoder
-from schemes import BaseModel, WordModel
-from database import session,engine
+from sqlalchemy.orm import Session
+from schemes import WordModel
+from models import Word, Unit
+from database import get_db
 
 word_router = APIRouter(
     prefix='/word'
 )
 
-session = session(bind=engine)
 
 @word_router.post('/add-word')
-async def add_new_word(word: WordModel):
-
-    unit = session.query(Unit).filter(Unit.id==word.unit_id).first()
+async def add_new_word(word: WordModel, db: Session = Depends(get_db)):
+    unit = db.query(Unit).filter(Unit.id == word.unit_id).first()
     if unit is None:
         return {
-            'success':False,
+            'success': False,
             'code': 403,
             'message': 'Bunday idli kitob topilmadi',
             'data': None
         }
 
     new_word = Word(
-        word_en = word.word_en,
-        word_uz = word.word_uz,
-        comment = word.comment,
-        definition = word.definition,
-        phonetic = word.phonetic,
-        example = word.example,
-        word_classes = word.word_classes,
-        isFavorite = word.isFavorite,
-        unit_id = word.unit_id
+        word_en=word.word_en,
+        word_uz=word.word_uz,
+        comment=word.comment,
+        definition=word.definition,
+        phonetic=word.phonetic,
+        example=word.example,
+        word_classes=word.word_classes,
+        isFavorite=word.isFavorite,
+        unit_id=word.unit_id
     )
 
-    session.add(new_word)
-    session.commit()
+    db.add(new_word)
+    db.commit()
 
     custom_data = {
         'success': True,
@@ -59,19 +58,19 @@ async def add_new_word(word: WordModel):
 
 
 @word_router.delete('/delete-word')
-async def delete_word(id: int):
-    word = session.query(Word).filter(Word.id==id).first()
+async def delete_word(id: int, db: Session = Depends(get_db)):
+    word = db.query(Word).filter(Word.id == id).first()
 
     if word is None:
         return {
-            'success':False,
+            'success': False,
             'code': 403,
             'message': 'Bunday idli kitob topilmadi',
             'data': None
         }
 
-    session.delete(word)
-    session.commit()
+    db.delete(word)
+    db.commit()
 
     custom_data = {
         'success': True,
@@ -82,13 +81,12 @@ async def delete_word(id: int):
     return jsonable_encoder(custom_data)
 
 
-@word_router.get('/favorite-words',status_code=200)
-async def get_favorite_words():
-    
-    words = session.query(Word).filter(Word.isFavorite==True).all()
+@word_router.get('/favorite-words', status_code=200)
+async def get_favorite_words(db: Session = Depends(get_db)):
+    words = db.query(Word).filter(Word.isFavorite == True).all()
 
     custom_data = {
-        'success':True,
+        'success': True,
         'code': 200,
         'message': 'Hammasi yaxshi',
         'data': [
@@ -110,22 +108,21 @@ async def get_favorite_words():
     return jsonable_encoder(custom_data)
 
 
-
-@word_router.get('/{unit_id}',status_code=200)
-async def get_unit_words(unit_id:int):
-    unit = session.query(Unit).filter(Unit.id == unit_id).first()
+@word_router.get('/{unit_id}', status_code=200)
+async def get_unit_words(unit_id: int, db: Session = Depends(get_db)):
+    unit = db.query(Unit).filter(Unit.id == unit_id).first()
     if unit is None:
         return {
-            'success':False,
+            'success': False,
             'code': 403,
             'message': 'Bunday idli unit topilmadi',
             'data': None
         }
 
-    words = session.query(Word).filter(unit.id==Word.unit_id).order_by(Word.unit_id, Word.id).all()
+    words = db.query(Word).filter(unit.id == Word.unit_id).order_by(Word.unit_id, Word.id).all()
 
     custom_data = {
-        'success':True,
+        'success': True,
         'code': 200,
         'message': 'Hammasi yaxshi',
         'data': [
@@ -147,11 +144,9 @@ async def get_unit_words(unit_id:int):
     return jsonable_encoder(custom_data)
 
 
-
-@word_router.put('/add-favorite/{id}',status_code=200)
-async def add_favorite_words(id: int):
-    
-    word = session.query(Word).filter(Word.id==id).first()
+@word_router.put('/add-favorite/{id}', status_code=200)
+async def add_favorite_words(id: int, db: Session = Depends(get_db)):
+    word = db.query(Word).filter(Word.id == id).first()
 
     if word is None:
         return {
@@ -162,10 +157,10 @@ async def add_favorite_words(id: int):
         }
 
     word.isFavorite = not word.isFavorite
-    session.commit()
+    db.commit()
 
     custom_data = {
-        'success':True,
+        'success': True,
         'code': 200,
         'message': 'Hammasi yaxshi',
         'data': "Word added to favorites list"
@@ -173,10 +168,9 @@ async def add_favorite_words(id: int):
     return jsonable_encoder(custom_data)
 
 
-@word_router.put('/add-comment/{id}',status_code=200)
-async def add_comment_words(id: int,comment: str):
-    
-    word = session.query(Word).filter(Word.id==id).first()
+@word_router.put('/add-comment/{id}', status_code=200)
+async def add_comment_words(id: int, comment: str, db: Session = Depends(get_db)):
+    word = db.query(Word).filter(Word.id == id).first()
 
     if word is None:
         return {
@@ -187,10 +181,10 @@ async def add_comment_words(id: int,comment: str):
         }
 
     word.comment = comment
-    session.commit()
+    db.commit()
 
     custom_data = {
-        'success':True,
+        'success': True,
         'code': 200,
         'message': 'Hammasi yaxshi',
         'data': "Comment is added successful"
@@ -199,8 +193,8 @@ async def add_comment_words(id: int,comment: str):
 
 
 @word_router.put('/edit-word/{id}', status_code=200)
-async def edit_word(id: int, word: WordModel):
-    word_old = session.query(Word).filter(Word.id == id).first()
+async def edit_word(id: int, word: WordModel, db: Session = Depends(get_db)):
+    word_old = db.query(Word).filter(Word.id == id).first()
     if word_old is None:
         return {
             'success': False,
@@ -219,7 +213,7 @@ async def edit_word(id: int, word: WordModel):
     word_old.isFavorite = word.isFavorite
     if word.unit_id is not None:
         word_old.unit_id = word.unit_id
-    session.commit()
+    db.commit()
 
     return jsonable_encoder({
         'success': True,
