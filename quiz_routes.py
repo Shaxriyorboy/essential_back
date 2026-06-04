@@ -2,8 +2,11 @@ import random
 from fastapi import Depends, HTTPException, APIRouter
 from fastapi.encoders import jsonable_encoder
 from sqlalchemy.orm import Session
-from models import Unit, Word
+from models import Unit, Word, User
 from database import get_db
+from auth import get_current_user
+from schemes import QuizSubmitModel
+from streak import close_day, QUIZ_PASS_PERCENT
 
 quiz_router = APIRouter(
     prefix='/quiz'
@@ -65,4 +68,57 @@ def get_unit_quiz(unit_id: int, count: int = 10, db: Session = Depends(get_db)):
         "success": True,
         "status_code": 200,
         "data": [build_question(w, words) for w in selected]
+    })
+
+
+@quiz_router.post("/submit")
+def submit_quiz(
+    body: QuizSubmitModel,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Quiz javoblarini SERVER baholaydi (client'ga ishonmaymiz) va natija
+    >= 80% bo'lsa foydalanuvchining bugungi streakini yopadi.
+
+    Kun client'ning mahalliy sanasi (`local_date`) bo'yicha hisoblanadi."""
+    answers = body.answers
+    total = len(answers)
+    if total == 0:
+        raise HTTPException(status_code=400, detail="Javoblar bo'sh")
+
+    # So'zlarni bitta so'rovda olib, id -> to'g'ri javob (word_en) xaritasini tuzamiz
+    word_ids = [a.word_id for a in answers]
+    words = db.query(Word).filter(Word.id.in_(word_ids)).all()
+    correct_by_id = {w.id: (w.word_en or "").strip().lower() for w in words}
+
+    correct = 0
+    for a in answers:
+        right = correct_by_id.get(a.word_id)
+        if right is not None and (a.answer or "").strip().lower() == right:
+            correct += 1
+
+    score = round(correct / total * 100)
+    passed = score >= QUIZ_PASS_PERCENT
+
+    streak = {
+        "current_streak": user.current_streak or 0,
+        "longest_streak": user.longest_streak or 0,
+        "last_active_date": user.last_active_date,
+        "increased": False,
+    }
+    if passed:
+        streak = close_day(db, user, body.local_date, "quiz", score)
+
+    return jsonable_encoder({
+        "success": True,
+        "code": 200,
+        "message": "Natija qabul qilindi",
+        "data": {
+            "score": score,
+            "correct": correct,
+            "total": total,
+            "passed": passed,
+            "pass_percent": QUIZ_PASS_PERCENT,
+            "streak": streak,
+        },
     })

@@ -1,5 +1,28 @@
 from pydantic import BaseModel
-from typing import Optional
+from typing import List, Optional
+
+
+class QuizAnswerItem(BaseModel):
+    word_id: int
+    answer: str   # foydalanuvchi tanlagan variant (word_en)
+
+
+class QuizSubmitModel(BaseModel):
+    source: str = "quiz"          # "quiz" | "ai"
+    local_date: str               # client mahalliy sanasi "YYYY-MM-DD"
+    answers: List[QuizAnswerItem]
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "source": "quiz",
+                "local_date": "2026-06-04",
+                "answers": [
+                    {"word_id": 1, "answer": "apple"},
+                    {"word_id": 2, "answer": "book"},
+                ],
+            }
+        }
 
 
 class GoogleAuthModel(BaseModel):

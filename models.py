@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
 from database import Base
-from sqlalchemy import Column, Integer, Text, Boolean, String, ForeignKey, DateTime
+from sqlalchemy import Column, Integer, Text, Boolean, String, ForeignKey, DateTime, UniqueConstraint
 from sqlalchemy.orm import relationship
 from sqlalchemy_utils.types import ChoiceType
 
@@ -29,6 +29,26 @@ class User(Base):
     last_active_date = Column(String, nullable=True)  # local sana, ISO "YYYY-MM-DD"
 
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class StreakDay(Base):
+    """Foydalanuvchi ma'lum bir kunni "yopgan"ligini bildiradi (streak uchun).
+
+    local_date — foydalanuvchining O'Z mahalliy sanasi ("YYYY-MM-DD"), client
+    yuboradi (vaqt zonasi har kim uchun o'ziga mos bo'lishi uchun).
+    Har bir (user, local_date) uchun bitta yozuv — kunni quiz YOKI ai yopadi.
+    """
+    __tablename__ = 'streak_days'
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey('users.id'), index=True)
+    local_date = Column(String, index=True)   # "YYYY-MM-DD" (client local)
+    source = Column(String)                    # "quiz" | "ai"
+    score = Column(Integer, default=0)         # foiz (0-100)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (
+        UniqueConstraint('user_id', 'local_date', name='uq_user_localdate'),
+    )
 
 
 class Book(Base):
