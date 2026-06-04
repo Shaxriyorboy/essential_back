@@ -1,7 +1,35 @@
+from datetime import datetime, timezone
+
 from database import Base
-from sqlalchemy import Column, Integer, Text, Boolean, String, ForeignKey
+from sqlalchemy import Column, Integer, Text, Boolean, String, ForeignKey, DateTime
 from sqlalchemy.orm import relationship
 from sqlalchemy_utils.types import ChoiceType
+
+
+class User(Base):
+    __tablename__ = 'users'
+    id = Column(Integer, primary_key=True)
+
+    # Google Sign-In ma'lumotlari
+    google_sub = Column(String, unique=True, index=True, nullable=True)  # Google'dagi unique id
+    email = Column(String, unique=True, index=True, nullable=True)
+    name = Column(String, nullable=True)
+    picture = Column(String, nullable=True)
+
+    # Auth manbasi — hozir "google", kelajakda "phone" (SMS) qo'shiladi
+    auth_provider = Column(String, default="google")
+    phone = Column(String, unique=True, nullable=True)
+    password_hash = Column(String, nullable=True)
+
+    is_admin = Column(Boolean, default=False)
+
+    # Streak (Bosqich 1) — ustunlarni hozir qo'shamiz, keyin migratsiya kerak bo'lmasin
+    current_streak = Column(Integer, default=0)
+    longest_streak = Column(Integer, default=0)
+    last_active_date = Column(String, nullable=True)  # local sana, ISO "YYYY-MM-DD"
+
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
 
 class Book(Base):
     __tablename__ = 'book'

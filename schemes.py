@@ -2,6 +2,17 @@ from pydantic import BaseModel
 from typing import Optional
 
 
+class GoogleAuthModel(BaseModel):
+    id_token: str
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "id_token": "eyJhbGciOi... (Google Sign-In dan olingan id_token)"
+            }
+        }
+
+
 class BookModel(BaseModel):
     name: str
 
