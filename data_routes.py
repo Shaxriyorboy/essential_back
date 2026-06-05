@@ -1,6 +1,7 @@
 from typing import List, Optional
 from fastapi import APIRouter, Depends
 from fastapi.encoders import jsonable_encoder
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from models import Book, Unit, Word
@@ -9,6 +10,28 @@ from database import get_db
 data_router = APIRouter(
     prefix='/data'
 )
+
+
+def _reset_all_data(db: Session) -> None:
+    """Barcha kitob/unit/so'zlarni o'chiradi VA ID hisoblagichni (sequence)
+    qaytadan 1 dan boshlanadigan qiladi. Postgres va SQLite'da ham ishlaydi."""
+    dialect = db.bind.dialect.name
+    if dialect == 'postgresql':
+        # CASCADE — FK'larni hisobga oladi, RESTART IDENTITY — id'ni 1 ga qaytaradi
+        db.execute(text('TRUNCATE TABLE word, unit, book RESTART IDENTITY CASCADE'))
+    else:
+        # SQLite: bo'sh jadvalga yangi yozuv 1 dan boshlanadi (oddiy PK rowid).
+        # AUTOINCREMENT ishlatilgan bo'lsa sqlite_sequence'ni ham tozalaymiz.
+        db.query(Word).delete()
+        db.query(Unit).delete()
+        db.query(Book).delete()
+        try:
+            db.execute(text(
+                "DELETE FROM sqlite_sequence WHERE name IN ('word', 'unit', 'book')"
+            ))
+        except Exception:
+            pass  # sqlite_sequence jadvali yo'q — muammo emas
+    db.commit()
 
 
 # ---------- Import uchun sxemalar ----------
@@ -81,10 +104,7 @@ async def export_data(db: Session = Depends(get_db)):
 async def import_data(payload: ImportPayload, db: Session = Depends(get_db)):
     """JSON ma'lumotni bazaga yozadi. mode='replace' bo'lsa avval tozalaydi."""
     if payload.mode == 'replace':
-        db.query(Word).delete()
-        db.query(Unit).delete()
-        db.query(Book).delete()
-        db.commit()
+        _reset_all_data(db)
 
     books_added = units_added = words_added = 0
 
