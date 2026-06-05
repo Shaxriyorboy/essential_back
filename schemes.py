@@ -10,6 +10,7 @@ class QuizAnswerItem(BaseModel):
 class QuizSubmitModel(BaseModel):
     source: str = "quiz"          # "quiz" | "ai"
     local_date: str               # client mahalliy sanasi "YYYY-MM-DD"
+    unit_id: Optional[int] = None  # qaysi unit quizi — completion uchun kerak
     answers: List[QuizAnswerItem]
 
     class Config:
@@ -17,6 +18,7 @@ class QuizSubmitModel(BaseModel):
             "example": {
                 "source": "quiz",
                 "local_date": "2026-06-04",
+                "unit_id": 1,
                 "answers": [
                     {"word_id": 1, "answer": "apple"},
                     {"word_id": 2, "answer": "book"},

@@ -7,6 +7,7 @@ from database import get_db
 from auth import get_current_user
 from schemes import QuizSubmitModel
 from streak import close_day, QUIZ_PASS_PERCENT
+from progress import complete_unit_if_new
 
 quiz_router = APIRouter(
     prefix='/quiz'
@@ -106,8 +107,22 @@ def submit_quiz(
         "last_active_date": user.last_active_date,
         "increased": False,
     }
-    if passed:
-        streak = close_day(db, user, body.local_date, "quiz", score)
+    completion = {
+        "newly_completed": False,
+        "already_completed": False,
+        "book_id": None,
+        "book_completed": False,
+    }
+
+    # Streak FAQAT yangi unit tugatilganda beriladi (kelishilgan qoida).
+    # Shu sababli streak uchun unit_id majburiy — book quiz (aralash) streak bermaydi.
+    if passed and body.unit_id is not None:
+        completion = complete_unit_if_new(db, user.id, body.unit_id, score)
+        if completion["newly_completed"]:
+            streak = close_day(db, user, body.local_date, "quiz", score)
+        # UnitCompletion'ni kafolatli saqlaymiz: close_day kun allaqachon
+        # yopilgan bo'lsa commit qilmaydi, shuning uchun bu yerda commit qilamiz.
+        db.commit()
 
     return jsonable_encoder({
         "success": True,
@@ -120,5 +135,6 @@ def submit_quiz(
             "passed": passed,
             "pass_percent": QUIZ_PASS_PERCENT,
             "streak": streak,
+            "completion": completion,
         },
     })

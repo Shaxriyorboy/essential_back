@@ -7,6 +7,7 @@ from word_routes import word_router
 from quiz_routes import quiz_router
 from stats_routes import stats_router
 from data_routes import data_router
+from progress_routes import progress_router
 from database import Base, engine
 
 app = FastAPI()
@@ -28,6 +29,7 @@ app.include_router(word_router)
 app.include_router(quiz_router)
 app.include_router(stats_router)
 app.include_router(data_router)
+app.include_router(progress_router)
 
 @app.get("/")
 async def root():

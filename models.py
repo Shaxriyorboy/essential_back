@@ -51,6 +51,25 @@ class StreakDay(Base):
     )
 
 
+class UnitCompletion(Base):
+    """Foydalanuvchi ma'lum bir unitni tugatganini bildiradi.
+
+    Unit quizini >=80% topshirilganda yoziladi. Har (user, unit) uchun bitta
+    yozuv — bir marta tugatilgach o'zgarmaydi. Kitob "tugatilgan"ligi alohida
+    saqlanmaydi — kitobdagi barcha unit complete bo'lsa, hisoblab chiqariladi.
+    """
+    __tablename__ = 'unit_completions'
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey('users.id'), index=True)
+    unit_id = Column(Integer, ForeignKey('unit.id'), index=True)
+    score = Column(Integer, default=0)   # birinchi tugatgandagi natija (foiz)
+    completed_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (
+        UniqueConstraint('user_id', 'unit_id', name='uq_user_unit'),
+    )
+
+
 class Book(Base):
     __tablename__ = 'book'
     id = Column(Integer,primary_key=True)
