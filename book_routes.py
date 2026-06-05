@@ -88,7 +88,7 @@ async def deleteBook(id: int, db: Session = Depends(get_db)):
 
 @book_router.get('/all-book')
 async def get_all_book(db: Session = Depends(get_db)):
-    books = db.query(Book).all()
+    books = db.query(Book).order_by(Book.id).all()
 
     custom_data = {
         'success': True,

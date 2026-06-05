@@ -83,7 +83,7 @@ async def delete_word(id: int, db: Session = Depends(get_db)):
 
 @word_router.get('/favorite-words', status_code=200)
 async def get_favorite_words(db: Session = Depends(get_db)):
-    words = db.query(Word).filter(Word.isFavorite == True).all()
+    words = db.query(Word).filter(Word.isFavorite == True).order_by(Word.id).all()
 
     custom_data = {
         'success': True,

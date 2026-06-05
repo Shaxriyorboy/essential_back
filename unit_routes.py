@@ -58,7 +58,7 @@ async def get_single_unit(book_id: int, db: Session = Depends(get_db)):
             'data': None
         }
 
-    units = db.query(Unit).filter(Unit.book_id == book_id).all()
+    units = db.query(Unit).filter(Unit.book_id == book_id).order_by(Unit.id).all()
     custom_data = {
         'success': True,
         'code': 201,
