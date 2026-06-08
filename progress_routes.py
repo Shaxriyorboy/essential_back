@@ -11,9 +11,14 @@ progress_router = APIRouter(
 )
 
 
-@progress_router.get('/')
+@progress_router.get('')
 def get_progress(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     """Joriy foydalanuvchining tugatgan unit va kitoblari.
+
+    MUHIM: yo'l `''` (= `/progress`) — frontend `/progress` so'raydi. Agar
+    `'/'` ('/progress/') bo'lsa, server 307 redirect qiladi va `http` paketi
+    redirect paytida `Authorization` header'ni yo'qotadi → 401. Aniq moslik
+    redirect'ni va shu bug'ni yo'q qiladi."""
 
     App shu ro'yxatlar asosida unit/kitobga "tugatilgan" belgisini qo'yadi.
     """
