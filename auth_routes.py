@@ -7,7 +7,7 @@ from google.oauth2 import id_token as google_id_token
 from google.auth.transport import requests as google_requests
 
 from database import get_db
-from models import User
+from models import User, Device, StreakDay, UnitCompletion
 from schemes import GoogleAuthModel
 from auth import create_access_token, get_current_user
 
@@ -105,4 +105,29 @@ async def get_me(user: User = Depends(get_current_user)):
         'code': 200,
         'message': 'Hammasi yaxshi',
         'data': _user_dict(user),
+    })
+
+
+# Hisobni o'chirish — frontend `DELETE /account` chaqiradi (shu sababli alohida
+# router, `/auth` prefiksisiz).
+account_router = APIRouter(prefix='/account')
+
+
+@account_router.delete('')
+def delete_account(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Joriy foydalanuvchini va unga bog'liq barcha ma'lumotlarni o'chiradi.
+
+    Bu amalni qaytarib bo'lmaydi: profil, streak kunlari, unit tugatishlari
+    va push qurilmalari butunlay o'chadi."""
+    db.query(Device).filter(Device.user_id == user.id).delete()
+    db.query(StreakDay).filter(StreakDay.user_id == user.id).delete()
+    db.query(UnitCompletion).filter(UnitCompletion.user_id == user.id).delete()
+    db.delete(user)
+    db.commit()
+
+    return jsonable_encoder({
+        'success': True,
+        'code': 200,
+        'message': "Hisob o'chirildi",
+        'data': None,
     })

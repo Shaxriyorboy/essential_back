@@ -16,4 +16,5 @@ SQLAlchemy==2.0.37
 SQLAlchemy-Utils==0.41.2
 starlette==0.41.3
 typing_extensions==4.12.2
+tzdata==2025.1
 uvicorn==0.34.0

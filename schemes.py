@@ -27,6 +27,30 @@ class QuizSubmitModel(BaseModel):
         }
 
 
+class DeviceRegisterModel(BaseModel):
+    token: str                          # FCM registration token
+    platform: Optional[str] = None      # "android" | "ios"
+    timezone: Optional[str] = None      # IANA zona, masalan "Asia/Tashkent"
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "token": "fcm-registration-token...",
+                "platform": "android",
+                "timezone": "Asia/Tashkent",
+            }
+        }
+
+
+class DeviceUnregisterModel(BaseModel):
+    token: str
+
+    class Config:
+        json_schema_extra = {
+            "example": {"token": "fcm-registration-token..."}
+        }
+
+
 class GoogleAuthModel(BaseModel):
     id_token: str
 

@@ -70,6 +70,28 @@ class UnitCompletion(Base):
     )
 
 
+class Device(Base):
+    """Foydalanuvchining push (FCM) qurilmasi.
+
+    Login bo'lganda ilova FCM tokenini shu yerga ro'yxatdan o'tkazadi
+    (`POST /devices`). Server streak eslatmalarini shu tokenlarga yuboradi.
+    `token` unique — bitta qurilma bitta yozuv. Qurilma egasi o'zgarsa
+    (boshqa akkaunt kirsa) `user_id` yangilanadi.
+    """
+    __tablename__ = 'devices'
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey('users.id'), index=True)
+    token = Column(String, unique=True, index=True)   # FCM registration token
+    platform = Column(String, nullable=True)          # "android" | "ios"
+    timezone = Column(String, nullable=True)          # IANA zona, masalan "Asia/Tashkent"
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+
 class Book(Base):
     __tablename__ = 'book'
     id = Column(Integer,primary_key=True)
