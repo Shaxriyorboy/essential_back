@@ -12,6 +12,8 @@ class User(Base):
 
     # Google Sign-In ma'lumotlari
     google_sub = Column(String, unique=True, index=True, nullable=True)  # Google'dagi unique id
+    # Apple Sign-In ma'lumoti (Apple'dagi unique `sub`)
+    apple_sub = Column(String, unique=True, index=True, nullable=True)
     email = Column(String, unique=True, index=True, nullable=True)
     name = Column(String, nullable=True)
     picture = Column(String, nullable=True)

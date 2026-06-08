@@ -10,8 +10,28 @@ from data_routes import data_router
 from progress_routes import progress_router
 from device_routes import device_router
 from database import Base, engine
+from sqlalchemy import text
 
 app = FastAPI()
+
+
+def _ensure_schema():
+    """Mavjud bazaga yangi ustunlarni qo'shadi (Alembic yo'q — yengil migratsiya).
+
+    `create_all` mavjud jadvalga ustun qo'shmaydi, shuning uchun yangi
+    `users.apple_sub` ustunini qo'lda, idempotent tarzda qo'shamiz."""
+    dialect = engine.dialect.name
+    with engine.begin() as conn:
+        if dialect == "postgresql":
+            conn.execute(text(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS apple_sub VARCHAR"))
+            conn.execute(text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS ix_users_apple_sub "
+                "ON users (apple_sub)"))
+        elif dialect == "sqlite":
+            cols = [r[1] for r in conn.execute(text("PRAGMA table_info(users)"))]
+            if "apple_sub" not in cols:
+                conn.execute(text("ALTER TABLE users ADD COLUMN apple_sub VARCHAR"))
 
 app.add_middleware(
     CORSMiddleware,
@@ -22,6 +42,7 @@ app.add_middleware(
 )
 
 Base.metadata.create_all(bind=engine)
+_ensure_schema()
 
 app.include_router(auth_router)
 app.include_router(book_router)

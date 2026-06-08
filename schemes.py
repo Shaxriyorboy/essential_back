@@ -62,6 +62,24 @@ class GoogleAuthModel(BaseModel):
         }
 
 
+class AppleAuthModel(BaseModel):
+    identity_token: str             # Apple'dan olingan identityToken (JWT)
+    raw_nonce: Optional[str] = None  # nonce tekshiruvi uchun (xom holatda)
+    # Apple ism/email'ni FAQAT birinchi kirishda beradi — client uzatadi.
+    name: Optional[str] = None
+    email: Optional[str] = None
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "identity_token": "eyJhbGciOi... (Apple Sign-In identityToken)",
+                "raw_nonce": "random-nonce",
+                "name": "Shaxriyor Tursunaliyev",
+                "email": "user@privaterelay.appleid.com",
+            }
+        }
+
+
 class BookModel(BaseModel):
     name: str
 
