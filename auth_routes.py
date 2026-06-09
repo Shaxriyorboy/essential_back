@@ -10,7 +10,7 @@ from google.oauth2 import id_token as google_id_token
 from google.auth.transport import requests as google_requests
 
 from database import get_db
-from models import User, Device, StreakDay, UnitCompletion
+from models import User, Device, StreakDay, UnitCompletion, UserFavorite, WordComment
 from schemes import GoogleAuthModel, AppleAuthModel, RefreshModel
 from auth import (
     create_access_token,
@@ -247,6 +247,8 @@ def delete_account(db: Session = Depends(get_db), user: User = Depends(get_curre
     db.query(Device).filter(Device.user_id == user.id).delete()
     db.query(StreakDay).filter(StreakDay.user_id == user.id).delete()
     db.query(UnitCompletion).filter(UnitCompletion.user_id == user.id).delete()
+    db.query(UserFavorite).filter(UserFavorite.user_id == user.id).delete()
+    db.query(WordComment).filter(WordComment.user_id == user.id).delete()
     revoke_all_refresh_tokens(user.id, db)
     db.delete(user)
     db.commit()

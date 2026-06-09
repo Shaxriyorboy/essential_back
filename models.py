@@ -94,6 +94,39 @@ class Device(Base):
     )
 
 
+class UserFavorite(Base):
+    """Foydalanuvchining saralangan so'zi (per-user). Word.isFavorite global
+    maydon o'rniga — har bir foydalanuvchining o'z favoritesi."""
+    __tablename__ = 'user_favorites'
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey('users.id'), index=True)
+    word_id = Column(Integer, ForeignKey('word.id'), index=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (
+        UniqueConstraint('user_id', 'word_id', name='uq_user_word_fav'),
+    )
+
+
+class WordComment(Base):
+    """Foydalanuvchining so'zga yozgan shaxsiy izohi (per-user, faqat o'zi ko'radi).
+    Word.comment global maydon o'rniga — ommaviy UGC emas."""
+    __tablename__ = 'word_comments'
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey('users.id'), index=True)
+    word_id = Column(Integer, ForeignKey('word.id'), index=True)
+    text = Column(String)
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+    __table_args__ = (
+        UniqueConstraint('user_id', 'word_id', name='uq_user_word_comment'),
+    )
+
+
 class RefreshToken(Base):
     """Refresh token (uzoq muddat). Access token tugaganda client shu orqali
     yangi access token oladi. DB'da SAQLANADI (hash) — shuning uchun bekor
