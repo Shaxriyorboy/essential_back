@@ -1,4 +1,6 @@
+import hashlib
 import os
+import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -8,22 +10,72 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 
 from database import get_db
-from models import User
+from models import User, RefreshToken
 
 # JWT sozlamalari. Maxfiy kalit env'dan olinadi (Render'ga JWT_SECRET qo'shing).
 JWT_SECRET = os.environ.get("JWT_SECRET", "dev-secret-change-me")
 JWT_ALGORITHM = "HS256"
-JWT_EXPIRE_DAYS = 30  # mobil ilova uchun uzoq muddat
+ACCESS_EXPIRE_DAYS = 1     # access token — qisqa
+REFRESH_EXPIRE_DAYS = 90   # refresh token — uzoq
 
 # auto_error=False — token bo'lmasa o'zimiz tushunarli xato qaytaramiz
 bearer_scheme = HTTPBearer(auto_error=False)
 
 
 def create_access_token(user_id: int) -> str:
-    """Foydalanuvchi uchun JWT token yaratadi."""
-    expire = datetime.now(timezone.utc) + timedelta(days=JWT_EXPIRE_DAYS)
+    """Qisqa muddatli access JWT token yaratadi."""
+    expire = datetime.now(timezone.utc) + timedelta(days=ACCESS_EXPIRE_DAYS)
     payload = {"sub": str(user_id), "exp": expire}
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
+
+def _hash_token(raw: str) -> str:
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def create_refresh_token(user_id: int, db: Session) -> str:
+    """Tasodifiy refresh token yaratadi, hash'ini DB'ga saqlaydi, XOM tokenni
+    qaytaradi (faqat shu yerda ko'rinadi)."""
+    raw = secrets.token_urlsafe(48)
+    expire = datetime.now(timezone.utc) + timedelta(days=REFRESH_EXPIRE_DAYS)
+    db.add(RefreshToken(
+        user_id=user_id,
+        token_hash=_hash_token(raw),
+        expires_at=expire,
+    ))
+    db.commit()
+    return raw
+
+
+def verify_refresh_token(raw: str, db: Session) -> Optional[int]:
+    """Refresh token yaroqli bo'lsa user_id qaytaradi, aks holda None."""
+    row = db.query(RefreshToken).filter(
+        RefreshToken.token_hash == _hash_token(raw)
+    ).first()
+    if row is None:
+        return None
+    exp = row.expires_at
+    if exp is not None and exp.tzinfo is None:
+        exp = exp.replace(tzinfo=timezone.utc)
+    if exp is None or exp < datetime.now(timezone.utc):
+        db.delete(row)  # muddati tugagan — tozalaymiz
+        db.commit()
+        return None
+    return row.user_id
+
+
+def revoke_refresh_token(raw: str, db: Session) -> None:
+    """Bitta refresh tokenni o'chiradi (logout)."""
+    db.query(RefreshToken).filter(
+        RefreshToken.token_hash == _hash_token(raw)
+    ).delete()
+    db.commit()
+
+
+def revoke_all_refresh_tokens(user_id: int, db: Session) -> None:
+    """Foydalanuvchining barcha refresh tokenlarini o'chiradi (hisob o'chirish)."""
+    db.query(RefreshToken).filter(RefreshToken.user_id == user_id).delete()
+    db.commit()
 
 
 def _decode_token(token: str):

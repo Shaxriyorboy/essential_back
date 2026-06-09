@@ -62,6 +62,15 @@ class GoogleAuthModel(BaseModel):
         }
 
 
+class RefreshModel(BaseModel):
+    refresh_token: str
+
+    class Config:
+        json_schema_extra = {
+            "example": {"refresh_token": "long-random-refresh-token"}
+        }
+
+
 class AppleAuthModel(BaseModel):
     identity_token: str             # Apple'dan olingan identityToken (JWT)
     raw_nonce: Optional[str] = None  # nonce tekshiruvi uchun (xom holatda)

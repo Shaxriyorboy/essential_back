@@ -11,8 +11,15 @@ from google.auth.transport import requests as google_requests
 
 from database import get_db
 from models import User, Device, StreakDay, UnitCompletion
-from schemes import GoogleAuthModel, AppleAuthModel
-from auth import create_access_token, get_current_user
+from schemes import GoogleAuthModel, AppleAuthModel, RefreshModel
+from auth import (
+    create_access_token,
+    create_refresh_token,
+    verify_refresh_token,
+    revoke_refresh_token,
+    revoke_all_refresh_tokens,
+    get_current_user,
+)
 
 auth_router = APIRouter(prefix='/auth')
 
@@ -101,12 +108,14 @@ async def google_login(body: GoogleAuthModel, db: Session = Depends(get_db)):
     db.refresh(user)
 
     token = create_access_token(user.id)
+    refresh = create_refresh_token(user.id, db)
     return jsonable_encoder({
         'success': True,
         'code': 200,
         'message': 'Muvaffaqiyatli kirildi',
         'data': {
             'token': token,
+            'refresh_token': refresh,
             'user': _user_dict(user),
         }
     })
@@ -171,12 +180,14 @@ async def apple_login(body: AppleAuthModel, db: Session = Depends(get_db)):
     db.refresh(user)
 
     token = create_access_token(user.id)
+    refresh = create_refresh_token(user.id, db)
     return jsonable_encoder({
         'success': True,
         'code': 200,
         'message': 'Muvaffaqiyatli kirildi',
         'data': {
             'token': token,
+            'refresh_token': refresh,
             'user': _user_dict(user),
         }
     })
@@ -190,6 +201,35 @@ async def get_me(user: User = Depends(get_current_user)):
         'code': 200,
         'message': 'Hammasi yaxshi',
         'data': _user_dict(user),
+    })
+
+
+@auth_router.post('/refresh')
+def refresh(body: RefreshModel, db: Session = Depends(get_db)):
+    """Refresh token orqali yangi access token beradi. Refresh token o'zgarmaydi
+    (rotatsiya yo'q). Yaroqsiz/tugagan bo'lsa 401 — client qayta login qiladi."""
+    user_id = verify_refresh_token(body.refresh_token, db)
+    if user_id is None:
+        raise HTTPException(status_code=401, detail="Refresh token yaroqsiz")
+    token = create_access_token(user_id)
+    return jsonable_encoder({
+        'success': True,
+        'code': 200,
+        'message': 'Token yangilandi',
+        'data': {'token': token},
+    })
+
+
+@auth_router.post('/logout')
+def logout(body: RefreshModel, db: Session = Depends(get_db)):
+    """Chiqish — refresh tokenni serverdan o'chiradi (bekor qiladi).
+    Token bo'lmasa ham 200 (idempotent)."""
+    revoke_refresh_token(body.refresh_token, db)
+    return jsonable_encoder({
+        'success': True,
+        'code': 200,
+        'message': 'Chiqildi',
+        'data': None,
     })
 
 
@@ -207,6 +247,7 @@ def delete_account(db: Session = Depends(get_db), user: User = Depends(get_curre
     db.query(Device).filter(Device.user_id == user.id).delete()
     db.query(StreakDay).filter(StreakDay.user_id == user.id).delete()
     db.query(UnitCompletion).filter(UnitCompletion.user_id == user.id).delete()
+    revoke_all_refresh_tokens(user.id, db)
     db.delete(user)
     db.commit()
 

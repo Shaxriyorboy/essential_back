@@ -94,6 +94,19 @@ class Device(Base):
     )
 
 
+class RefreshToken(Base):
+    """Refresh token (uzoq muddat). Access token tugaganda client shu orqali
+    yangi access token oladi. DB'da SAQLANADI (hash) — shuning uchun bekor
+    qilish mumkin (logout, hisob o'chirish, barcha qurilmalardan chiqish).
+    """
+    __tablename__ = 'refresh_tokens'
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey('users.id'), index=True)
+    token_hash = Column(String, unique=True, index=True)  # sha256(raw_token)
+    expires_at = Column(DateTime)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
 class Book(Base):
     __tablename__ = 'book'
     id = Column(Integer,primary_key=True)
