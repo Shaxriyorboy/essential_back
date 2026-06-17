@@ -155,6 +155,25 @@ class Unit(Base):
     book = relationship("Book", back_populates="unit")
     word = relationship("Word",back_populates='unit')
 
+class AiUsage(Base):
+    """AI speaking partnyor uchun kunlik foydalanish hisoblagichi (per-user).
+
+    Bepul Gemini kvotasi (API kalit bo'yicha UMUMIY ~1500/kun) ni himoya qilish
+    uchun har foydalanuvchiga kunlik xabar limiti qo'yiladi. `date` — server
+    UTC sanasi ("YYYY-MM-DD"). Har (user, date) uchun bitta yozuv.
+    Bu YANGI jadval — `create_all` uni avtomatik yaratadi (qo'lda migratsiya kerakmas).
+    """
+    __tablename__ = 'ai_usage'
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey('users.id'), index=True)
+    date = Column(String, index=True)   # server UTC "YYYY-MM-DD"
+    count = Column(Integer, default=0)
+
+    __table_args__ = (
+        UniqueConstraint('user_id', 'date', name='uq_ai_usage_user_date'),
+    )
+
+
 class Word(Base):
     __tablename__ = 'word'
     id = Column(Integer, primary_key=True)

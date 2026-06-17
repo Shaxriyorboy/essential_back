@@ -9,6 +9,7 @@ from stats_routes import stats_router
 from data_routes import data_router
 from progress_routes import progress_router
 from device_routes import device_router
+from speaking_routes import speaking_router
 from database import Base, engine
 from sqlalchemy import text
 
@@ -53,6 +54,7 @@ app.include_router(stats_router)
 app.include_router(data_router)
 app.include_router(progress_router)
 app.include_router(device_router)
+app.include_router(speaking_router)
 app.include_router(account_router)
 
 @app.get("/")

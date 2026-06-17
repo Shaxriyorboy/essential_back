@@ -27,6 +27,31 @@ class QuizSubmitModel(BaseModel):
         }
 
 
+class SpeakingMessage(BaseModel):
+    role: str   # "user" | "model"
+    text: str
+
+
+class SpeakingChatModel(BaseModel):
+    """AI speaking partnyorga so'rov (SPEAKING_PARTNER_SPEC.md)."""
+    source: str = "unit"               # "unit" | "favorites"
+    unit_id: Optional[int] = None       # source == "unit" bo'lsa majburiy
+    locale: str = "uz"                  # "uz" | "ru" | "en" (ona tili proksi)
+    messages: List[SpeakingMessage] = []
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "source": "unit",
+                "unit_id": 1,
+                "locale": "uz",
+                "messages": [
+                    {"role": "user", "text": "Hi! I want to talk about my weekend."}
+                ],
+            }
+        }
+
+
 class DeviceRegisterModel(BaseModel):
     token: str                          # FCM registration token
     platform: Optional[str] = None      # "android" | "ios"
