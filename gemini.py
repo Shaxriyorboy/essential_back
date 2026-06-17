@@ -9,14 +9,38 @@ Yangi paket qo'shmaymiz — mavjud `requests` orqali REST API'ni chaqiramiz.
 """
 import json
 import os
+import time
 
 import requests
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+# flash-lite — bepul tier limiti kengroq va arzon (qisqa suhbat javoblari uchun yetarli).
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash-lite")
 _ENDPOINT = (
     "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 )
+
+# Bepul tier beqaror (503 "high demand" / 429 "quota") bo'lgani uchun bir nechta
+# modelni navbatma-navbat sinaymiz — biri band bo'lsa, keyingisiga o'tamiz.
+_FALLBACK_MODELS = [
+    "gemini-2.5-flash-lite",
+    "gemini-2.5-flash",
+    "gemini-2.0-flash-lite",
+    "gemini-2.0-flash",
+]
+# Shu statuslarда qayta urinamiz / boshqa modelga o'tamiz (vaqtinchalik).
+_RETRYABLE = {429, 500, 503}
+_ROUNDS = 2  # barcha modellardan o'tib bo'lgach yana shuncha marta takror
+
+
+def _models_to_try():
+    """Asosiy model + fallback'lar (takrorlanmasdan)."""
+    ordered, seen = [], set()
+    for m in [GEMINI_MODEL] + _FALLBACK_MODELS:
+        if m and m not in seen:
+            seen.add(m)
+            ordered.append(m)
+    return ordered
 
 # Structured output sxemasi — Gemini javobni AYNAN shu shaklda qaytaradi.
 # (SPEAKING_PARTNER_SPEC.md dagi "Response" bilan bir xil.)
@@ -74,26 +98,44 @@ def generate_chat(system_instruction: str, contents: list) -> dict:
         },
     }
 
-    try:
-        resp = requests.post(
-            _ENDPOINT.format(model=GEMINI_MODEL),
-            params={"key": GEMINI_API_KEY},
-            json=body,
-            timeout=30,
-        )
-    except requests.RequestException as e:
-        raise GeminiError(f"Gemini'ga ulanib bo'lmadi: {e}")
+    models = _models_to_try()
+    last_err = "urinish bo'lmadi"
 
-    if resp.status_code != 200:
-        raise GeminiError(f"Gemini xatosi {resp.status_code}: {resp.text[:300]}")
+    for round_idx in range(_ROUNDS):
+        for model in models:
+            try:
+                resp = requests.post(
+                    _ENDPOINT.format(model=model),
+                    params={"key": GEMINI_API_KEY},
+                    json=body,
+                    timeout=30,
+                )
+            except requests.RequestException as e:
+                last_err = f"{model}: ulanib bo'lmadi: {e}"
+                continue
 
-    data = resp.json()
+            if resp.status_code == 200:
+                return _parse(resp.json())
+
+            last_err = f"{model} {resp.status_code}: {resp.text[:200]}"
+            # 400/401/403/404 — sozlama/kalit xatosi, qayta urinishdan foyda yo'q.
+            if resp.status_code not in _RETRYABLE:
+                raise GeminiError(last_err)
+            # aks holda keyingi modelga o'tamiz (band/quota — vaqtinchalik)
+
+        # Bir aylanada hammasi band bo'lsa, qisqa kutib yana urinamiz.
+        if round_idx + 1 < _ROUNDS:
+            time.sleep(1.5)
+
+    raise GeminiError(last_err)
+
+
+def _parse(data: dict) -> dict:
     try:
         text = data["candidates"][0]["content"]["parts"][0]["text"]
     except (KeyError, IndexError):
         # Masalan safety bilan bloklangan yoki bo'sh javob
         raise GeminiError(f"Gemini javobi kutilmagan shaklda: {json.dumps(data)[:300]}")
-
     try:
         return json.loads(text)
     except json.JSONDecodeError:
