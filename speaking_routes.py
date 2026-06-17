@@ -214,6 +214,8 @@ def speaking_chat(
         "target_words_used_by_user": result.get("target_words_used_by_user", []),
         "target_words_introduced": result.get("target_words_introduced", []),
         "level": level,
+        # AI'ga berilgan target so'zlar soni (prompt'dagi haqiqiy son).
+        "target_word_count": len(words[:MAX_TARGET_WORDS]),
         "daily_used": usage.count,
         "daily_limit": AI_DAILY_LIMIT,
     })
