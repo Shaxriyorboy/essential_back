@@ -15,7 +15,9 @@ from sqlalchemy.orm import Session
 
 from datetime import timedelta
 
-from auth import get_current_user, get_current_admin
+from fastapi import Header
+
+from auth import get_current_user
 from database import get_db
 from gemini import GeminiError, generate_chat
 from models import AiUsage, Book, Unit, User, UserFavorite, Word
@@ -26,6 +28,19 @@ speaking_router = APIRouter(prefix='/speaking')
 
 # Bitta turn'da qo'shilishi mumkin bo'lgan eng ko'p vaqt (aldashni cheklash).
 MAX_TURN_SECONDS = 180
+
+# Admin panel (essential_admin) uchun maxfiy kalit. Railway'da ADMIN_SECRET
+# bilan o'rnatiladi; admin panel uni X-Admin-Secret header'da yuboradi.
+ADMIN_SECRET = os.environ.get("ADMIN_SECRET", "")
+
+
+def require_admin_secret(x_admin_secret: str = Header(default="")):
+    """Admin panel endpoint'lari uchun — X-Admin-Secret headerni tekshiradi.
+
+    (Admin panel frontend-only, JWT yo'q — shuning uchun maxfiy kalit ishlatamiz.)"""
+    if not ADMIN_SECRET or x_admin_secret != ADMIN_SECRET:
+        raise HTTPException(status_code=403, detail="Admin huquqi kerak")
+    return True
 
 # Promptni juda kattalashtirib yubormaslik uchun target so'zlar soni cheklanadi.
 MAX_TARGET_WORDS = 40
@@ -254,21 +269,60 @@ def speaking_quota(
                      _quota_data(user, used, limit, limit_reached=used >= limit))
 
 
+def _user_brief(u: User) -> dict:
+    """Admin paneli uchun foydalanuvchi qisqa ma'lumoti."""
+    exp = u.tier_expires_at
+    return {
+        "id": u.id,
+        "name": u.name,
+        "email": u.email,
+        "picture": u.picture,
+        "tier": effective_tier(u),
+        "tier_raw": u.tier or "free",
+        "tier_expires_at": exp.isoformat() if exp else None,
+    }
+
+
+@speaking_router.get('/admin/users')
+def admin_find_users(
+    search: str = "",
+    db: Session = Depends(get_db),
+    _: bool = Depends(require_admin_secret),
+):
+    """Admin: email yoki ism bo'yicha foydalanuvchilarni qidiradi (tarif berish uchun)."""
+    q = db.query(User)
+    s = (search or "").strip()
+    if s:
+        like = f"%{s}%"
+        q = q.filter((User.email.ilike(like)) | (User.name.ilike(like)))
+    users = q.order_by(User.id.desc()).limit(30).all()
+    return _envelope(True, 200, "Hammasi yaxshi",
+                     [_user_brief(u) for u in users])
+
+
 @speaking_router.post('/admin/set-tier')
 def admin_set_tier(
-    user_id: int,
     tier: str,
+    user_id: int = None,
+    email: str = None,
     days: int = 30,
     db: Session = Depends(get_db),
-    admin: User = Depends(get_current_admin),
+    _: bool = Depends(require_admin_secret),
 ):
     """Admin foydalanuvchiga tarif beradi (to'lov ulanmaguncha qo'lda boshqaruv).
 
-    tier: "free" | "pro" | "premium". days — obuna muddati (free uchun e'tiborsiz).
+    `user_id` YOKI `email` bilan topiladi. tier: "free" | "pro" | "premium".
+    days — obuna muddati. Muddat tugagach backend avtomatik "free"ga qaytaradi
+    (effective_tier) — alohida cancel kerak emas.
     """
     if tier not in TIER_DAILY_SECONDS:
         raise HTTPException(status_code=400, detail="Noto'g'ri tarif")
-    target = db.query(User).filter(User.id == user_id).first()
+
+    target = None
+    if user_id is not None:
+        target = db.query(User).filter(User.id == user_id).first()
+    elif email:
+        target = db.query(User).filter(User.email == email.strip()).first()
     if target is None:
         raise HTTPException(status_code=404, detail="Foydalanuvchi topilmadi")
 
@@ -278,12 +332,7 @@ def admin_set_tier(
     else:
         target.tier_expires_at = datetime.now(timezone.utc) + timedelta(days=days)
     db.commit()
-    return _envelope(True, 200, "Tarif yangilandi", {
-        "user_id": target.id,
-        "tier": target.tier,
-        "tier_expires_at": target.tier_expires_at.isoformat()
-        if target.tier_expires_at else None,
-    })
+    return _envelope(True, 200, "Tarif yangilandi", _user_brief(target))
 
 
 def _quota_data(user, used, limit, limit_reached):
