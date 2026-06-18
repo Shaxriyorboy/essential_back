@@ -33,10 +33,10 @@ _RETRYABLE = {429, 500, 503}
 _ROUNDS = 2  # barcha modellardan o'tib bo'lgach yana shuncha marta takror
 
 
-def _models_to_try():
-    """Asosiy model + fallback'lar (takrorlanmasdan)."""
+def _models_to_try(preferred_model=None):
+    """Afzal model (tarifга qarab) + asosiy + fallback'lar (takrorlanmasdan)."""
     ordered, seen = [], set()
-    for m in [GEMINI_MODEL] + _FALLBACK_MODELS:
+    for m in [preferred_model, GEMINI_MODEL] + _FALLBACK_MODELS:
         if m and m not in seen:
             seen.add(m)
             ordered.append(m)
@@ -76,7 +76,7 @@ class GeminiError(Exception):
     """Gemini bilan ishlashda yuzaga kelgan xato (kalit yo'q, tarmoq, yaroqsiz javob)."""
 
 
-def generate_chat(system_instruction: str, contents: list) -> dict:
+def generate_chat(system_instruction: str, contents: list, preferred_model=None) -> dict:
     """Gemini'ga structured-output bilan so'rov yuboradi va tayyor dict qaytaradi.
 
     system_instruction — rol + dynamic context (USER + TARGET WORDS).
@@ -98,7 +98,7 @@ def generate_chat(system_instruction: str, contents: list) -> dict:
         },
     }
 
-    models = _models_to_try()
+    models = _models_to_try(preferred_model)
     last_err = "urinish bo'lmadi"
 
     for round_idx in range(_ROUNDS):

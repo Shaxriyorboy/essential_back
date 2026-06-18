@@ -38,6 +38,10 @@ class SpeakingChatModel(BaseModel):
     unit_id: Optional[int] = None       # source == "unit" bo'lsa majburiy
     locale: str = "uz"                  # "uz" | "ru" | "en" (ona tili proksi)
     messages: List[SpeakingMessage] = []
+    # Oxirgi turn'dan beri suhbatда o'tgan faol vaqt (soniya). Client o'lchaydi;
+    # kunlik vaqt limitiga qo'shiladi. Greeting (birinchi) so'rovда 0 bo'ladi.
+    elapsed_seconds: int = 0
+    local_date: Optional[str] = None    # client mahalliy sanasi "YYYY-MM-DD"
 
     class Config:
         json_schema_extra = {

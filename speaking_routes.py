@@ -13,17 +13,19 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.encoders import jsonable_encoder
 from sqlalchemy.orm import Session
 
-from auth import get_current_user
+from datetime import timedelta
+
+from auth import get_current_user, get_current_admin
 from database import get_db
 from gemini import GeminiError, generate_chat
 from models import AiUsage, Book, Unit, User, UserFavorite, Word
 from schemes import SpeakingChatModel
+from tiers import daily_limit_seconds, effective_tier, model_for, TIER_DAILY_SECONDS
 
 speaking_router = APIRouter(prefix='/speaking')
 
-# Bepul Gemini kvotasini (API kalit bo'yicha umumiy ~1500/kun) himoya qilish uchun
-# har foydalanuvchiga kunlik xabar limiti. Render'da AI_DAILY_LIMIT bilan sozlanadi.
-AI_DAILY_LIMIT = int(os.environ.get("AI_DAILY_LIMIT", "30"))
+# Bitta turn'da qo'shilishi mumkin bo'lgan eng ko'p vaqt (aldashni cheklash).
+MAX_TURN_SECONDS = 180
 
 # Promptni juda kattalashtirib yubormaslik uchun target so'zlar soni cheklanadi.
 MAX_TARGET_WORDS = 40
@@ -149,6 +151,12 @@ def _today_utc() -> str:
     return datetime.now(timezone.utc).date().isoformat()
 
 
+def _usage_date(payload) -> str:
+    """Hisob sanasi — client mahalliy sanasi (bo'lsa), aks holda server UTC."""
+    d = getattr(payload, "local_date", None)
+    return d if d else _today_utc()
+
+
 def _envelope(success, code, message, data):
     return jsonable_encoder(
         {"success": success, "code": code, "message": message, "data": data}
@@ -163,21 +171,22 @@ def speaking_chat(
 ):
     """AI speaking partnyor bilan bitta suhbat aylanasi.
 
-    Login majburiy. Kunlik limit (per-user) bepul Gemini kvotasini himoya qiladi.
+    Login majburiy. Kunlik VAQT limiti (tarifga qarab) qo'llaniladi.
     """
-    today = _today_utc()
+    day = _usage_date(payload)
+    limit = daily_limit_seconds(user)
     usage = (
         db.query(AiUsage)
-        .filter(AiUsage.user_id == user.id, AiUsage.date == today)
+        .filter(AiUsage.user_id == user.id, AiUsage.date == day)
         .first()
     )
-    used = usage.count if usage else 0
+    used = (usage.seconds_used or 0) if usage else 0
 
-    # 1) Kunlik limit (Gemini chaqirmasdan oldin tekshiramiz — kvota tejaladi)
-    if used >= AI_DAILY_LIMIT:
+    # 1) Kunlik vaqt limiti (Gemini chaqirmasdan oldin tekshiramiz)
+    if used >= limit:
         return _envelope(
-            True, 429, "Bugungi AI suhbat limiti tugadi. Ertaga davom eting.",
-            {"limit_reached": True, "daily_used": used, "daily_limit": AI_DAILY_LIMIT},
+            True, 429, "Bugungi AI suhbat vaqti tugadi.",
+            _quota_data(user, used, limit, limit_reached=True),
         )
 
     # 2) Target so'zlar + daraja
@@ -194,28 +203,97 @@ def speaking_chat(
     system = _build_system_instruction(user, level, native, label, words)
     contents = _build_contents(payload.messages)
 
-    # 4) Gemini
+    # 4) Gemini (tarifga mos model bilan)
     try:
-        result = generate_chat(system, contents)
+        result = generate_chat(system, contents, preferred_model=model_for(user))
     except GeminiError as e:
         raise HTTPException(status_code=502, detail=f"AI xizmati xatosi: {e}")
 
-    # 5) Faqat MUVAFFAQIYATLI javobdan keyin hisoblagichni oshiramiz
+    # 5) Faqat MUVAFFAQIYATLI javobdan keyin vaqt + hisoblagichni yangilaymiz.
+    #    elapsed_seconds aldashni cheklash uchun [0, MAX_TURN_SECONDS] ga qisiladi.
+    elapsed = max(0, min(int(payload.elapsed_seconds or 0), MAX_TURN_SECONDS))
     if usage is None:
-        usage = AiUsage(user_id=user.id, date=today, count=0)
+        usage = AiUsage(user_id=user.id, date=day, count=0, seconds_used=0)
         db.add(usage)
     usage.count = (usage.count or 0) + 1
+    usage.seconds_used = (usage.seconds_used or 0) + elapsed
     db.commit()
 
-    # 6) Javob (Gemini natijasi + meta)
-    return _envelope(True, 200, "Hammasi yaxshi", {
+    # 6) Javob (Gemini natijasi + tarif/vaqt meta)
+    data = {
         "reply": result.get("reply", ""),
         "corrections": result.get("corrections", []),
         "target_words_used_by_user": result.get("target_words_used_by_user", []),
         "target_words_introduced": result.get("target_words_introduced", []),
         "level": level,
-        # AI'ga berilgan target so'zlar soni (prompt'dagi haqiqiy son).
         "target_word_count": len(words[:MAX_TARGET_WORDS]),
-        "daily_used": usage.count,
-        "daily_limit": AI_DAILY_LIMIT,
+    }
+    data.update(_quota_data(user, usage.seconds_used, limit,
+                            limit_reached=usage.seconds_used >= limit))
+    return _envelope(True, 200, "Hammasi yaxshi", data)
+
+
+@speaking_router.get('/quota')
+def speaking_quota(
+    local_date: str = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Foydalanuvchining bugungi qolgan AI vaqti va tarifi.
+
+    Speaking sahifasi ochilganda ko'rsatkichni darrov ko'rsatish uchun ishlatiladi."""
+    day = local_date or _today_utc()
+    limit = daily_limit_seconds(user)
+    usage = (
+        db.query(AiUsage)
+        .filter(AiUsage.user_id == user.id, AiUsage.date == day)
+        .first()
+    )
+    used = (usage.seconds_used or 0) if usage else 0
+    return _envelope(True, 200, "Hammasi yaxshi",
+                     _quota_data(user, used, limit, limit_reached=used >= limit))
+
+
+@speaking_router.post('/admin/set-tier')
+def admin_set_tier(
+    user_id: int,
+    tier: str,
+    days: int = 30,
+    db: Session = Depends(get_db),
+    admin: User = Depends(get_current_admin),
+):
+    """Admin foydalanuvchiga tarif beradi (to'lov ulanmaguncha qo'lda boshqaruv).
+
+    tier: "free" | "pro" | "premium". days — obuna muddati (free uchun e'tiborsiz).
+    """
+    if tier not in TIER_DAILY_SECONDS:
+        raise HTTPException(status_code=400, detail="Noto'g'ri tarif")
+    target = db.query(User).filter(User.id == user_id).first()
+    if target is None:
+        raise HTTPException(status_code=404, detail="Foydalanuvchi topilmadi")
+
+    target.tier = tier
+    if tier == "free":
+        target.tier_expires_at = None
+    else:
+        target.tier_expires_at = datetime.now(timezone.utc) + timedelta(days=days)
+    db.commit()
+    return _envelope(True, 200, "Tarif yangilandi", {
+        "user_id": target.id,
+        "tier": target.tier,
+        "tier_expires_at": target.tier_expires_at.isoformat()
+        if target.tier_expires_at else None,
     })
+
+
+def _quota_data(user, used, limit, limit_reached):
+    used = max(0, int(used))
+    return {
+        "tier": effective_tier(user),
+        "seconds_used": used,
+        "daily_limit_seconds": limit,
+        "seconds_left": max(0, limit - used),
+        "limit_reached": bool(limit_reached),
+        # Barcha tariflar limiti — app'da "tarif oshirish" ekranida ko'rsatish uchun.
+        "tier_limits": TIER_DAILY_SECONDS,
+    }

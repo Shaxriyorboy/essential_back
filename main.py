@@ -29,10 +29,25 @@ def _ensure_schema():
             conn.execute(text(
                 "CREATE UNIQUE INDEX IF NOT EXISTS ix_users_apple_sub "
                 "ON users (apple_sub)"))
+            # AI tarif ustunlari
+            conn.execute(text(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS tier VARCHAR DEFAULT 'free'"))
+            conn.execute(text(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS tier_expires_at TIMESTAMP"))
+            # AI kunlik vaqt hisobi (ai_usage jadvali mavjud bo'lsa)
+            conn.execute(text(
+                "ALTER TABLE ai_usage ADD COLUMN IF NOT EXISTS seconds_used INTEGER DEFAULT 0"))
         elif dialect == "sqlite":
-            cols = [r[1] for r in conn.execute(text("PRAGMA table_info(users)"))]
-            if "apple_sub" not in cols:
+            ucols = [r[1] for r in conn.execute(text("PRAGMA table_info(users)"))]
+            if "apple_sub" not in ucols:
                 conn.execute(text("ALTER TABLE users ADD COLUMN apple_sub VARCHAR"))
+            if "tier" not in ucols:
+                conn.execute(text("ALTER TABLE users ADD COLUMN tier VARCHAR DEFAULT 'free'"))
+            if "tier_expires_at" not in ucols:
+                conn.execute(text("ALTER TABLE users ADD COLUMN tier_expires_at TIMESTAMP"))
+            acols = [r[1] for r in conn.execute(text("PRAGMA table_info(ai_usage)"))]
+            if acols and "seconds_used" not in acols:
+                conn.execute(text("ALTER TABLE ai_usage ADD COLUMN seconds_used INTEGER DEFAULT 0"))
 
 app.add_middleware(
     CORSMiddleware,

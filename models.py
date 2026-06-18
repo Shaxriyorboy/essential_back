@@ -30,6 +30,12 @@ class User(Base):
     longest_streak = Column(Integer, default=0)
     last_active_date = Column(String, nullable=True)  # local sana, ISO "YYYY-MM-DD"
 
+    # AI Speaking tarifi. "free" | "pro" | "premium". Kunlik vaqt limiti shunга
+    # qarab beriladi (TIER_DAILY_SECONDS). tier_expires_at — oylik obuna tugash
+    # sanasi (None = bepul/cheksiz). Tugagach avtomatik "free"ga qaytadi.
+    tier = Column(String, default="free")
+    tier_expires_at = Column(DateTime, nullable=True)
+
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
@@ -166,8 +172,9 @@ class AiUsage(Base):
     __tablename__ = 'ai_usage'
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey('users.id'), index=True)
-    date = Column(String, index=True)   # server UTC "YYYY-MM-DD"
-    count = Column(Integer, default=0)
+    date = Column(String, index=True)   # foydalanuvchi mahalliy sanasi "YYYY-MM-DD"
+    count = Column(Integer, default=0)            # xabarlar soni (statistika uchun)
+    seconds_used = Column(Integer, default=0)     # shu kun ishlatilgan AI vaqt (soniya)
 
     __table_args__ = (
         UniqueConstraint('user_id', 'date', name='uq_ai_usage_user_date'),
