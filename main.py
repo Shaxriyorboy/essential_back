@@ -10,6 +10,7 @@ from data_routes import data_router
 from progress_routes import progress_router
 from device_routes import device_router
 from speaking_routes import speaking_router
+from telegram_routes import telegram_router, ensure_webhook
 from database import Base, engine
 from sqlalchemy import text
 
@@ -71,6 +72,14 @@ app.include_router(progress_router)
 app.include_router(device_router)
 app.include_router(speaking_router)
 app.include_router(account_router)
+app.include_router(telegram_router)
+
+
+@app.on_event("startup")
+def _on_startup():
+    # Telegram webhook'ni Render URL'iga avtomatik ulaydi (token bo'lsa).
+    ensure_webhook()
+
 
 @app.get("/")
 async def root():

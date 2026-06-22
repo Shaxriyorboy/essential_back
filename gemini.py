@@ -88,15 +88,25 @@ def generate_chat(system_instruction: str, contents: list, preferred_model=None)
     if not GEMINI_API_KEY:
         raise GeminiError("GEMINI_API_KEY o'rnatilmagan")
 
-    body = {
-        "systemInstruction": {"parts": [{"text": system_instruction}]},
-        "contents": contents,
-        "generationConfig": {
-            "temperature": 0.8,
-            "responseMimeType": "application/json",
-            "responseSchema": _RESPONSE_SCHEMA,
-        },
+    base_gen_config = {
+        "temperature": 0.8,
+        "responseMimeType": "application/json",
+        "responseSchema": _RESPONSE_SCHEMA,
     }
+
+    def _body_for(model):
+        gen = dict(base_gen_config)
+        # "Thinking"ni o'chiramiz — speaking suhbat uchun kerak emas. Output
+        # tokenni (ayniqsa premium=2.5-flash, $2.50/1M) keskin kamaytiradi va
+        # javobni tezlashtiradi. FAQAT 2.5 modellar qo'llaydi — 2.0'ga yuborilsa
+        # 400 beradi, shuning uchun shartli qo'shamiz.
+        if model.startswith("gemini-2.5"):
+            gen["thinkingConfig"] = {"thinkingBudget": 0}
+        return {
+            "systemInstruction": {"parts": [{"text": system_instruction}]},
+            "contents": contents,
+            "generationConfig": gen,
+        }
 
     models = _models_to_try(preferred_model)
     last_err = "urinish bo'lmadi"
@@ -107,7 +117,7 @@ def generate_chat(system_instruction: str, contents: list, preferred_model=None)
                 resp = requests.post(
                     _ENDPOINT.format(model=model),
                     params={"key": GEMINI_API_KEY},
-                    json=body,
+                    json=_body_for(model),
                     timeout=30,
                 )
             except requests.RequestException as e:
