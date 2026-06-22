@@ -21,7 +21,7 @@ from auth import get_current_user
 from database import get_db
 from gemini import GeminiError, generate_chat
 from models import AiUsage, Book, Unit, User, UserFavorite, Word
-from schemes import SpeakingChatModel
+from schemes import SpeakingChatModel, SpeakingConsumeModel
 from tiers import daily_limit_seconds, effective_tier, model_for, TIER_DAILY_SECONDS
 
 speaking_router = APIRouter(prefix='/speaking')
@@ -265,6 +265,36 @@ def speaking_quota(
         .first()
     )
     used = (usage.seconds_used or 0) if usage else 0
+    return _envelope(True, 200, "Hammasi yaxshi",
+                     _quota_data(user, used, limit, limit_reached=used >= limit))
+
+
+@speaking_router.post('/consume')
+def speaking_consume(
+    payload: SpeakingConsumeModel,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Suhbat o'tkazmasdan sarflangan AI vaqtni qayd etadi.
+
+    Vaqt o'zi tugaganda (xabar yubormay) yoki sahifadan chiqishda client shu
+    yerga oxirgi yuborilmagan soniyalarni yuboradi. Aks holda server `seconds_used`
+    eski qiymatda qoladi va qaytib kirganda vaqt noto'g'ri (masalan 5s) ko'rinadi.
+    elapsed [0, MAX_TURN_SECONDS] ga qisiladi (aldash himoyasi)."""
+    day = _usage_date(payload)  # chat bilan bir xil kun (row) — local_date yoki UTC
+    limit = daily_limit_seconds(user)
+    elapsed = max(0, min(int(payload.elapsed_seconds or 0), MAX_TURN_SECONDS))
+    usage = (
+        db.query(AiUsage)
+        .filter(AiUsage.user_id == user.id, AiUsage.date == day)
+        .first()
+    )
+    if usage is None:
+        usage = AiUsage(user_id=user.id, date=day, count=0, seconds_used=0)
+        db.add(usage)
+    usage.seconds_used = (usage.seconds_used or 0) + elapsed
+    db.commit()
+    used = usage.seconds_used or 0
     return _envelope(True, 200, "Hammasi yaxshi",
                      _quota_data(user, used, limit, limit_reached=used >= limit))
 

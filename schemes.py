@@ -32,6 +32,13 @@ class SpeakingMessage(BaseModel):
     text: str
 
 
+class SpeakingConsumeModel(BaseModel):
+    """Suhbat o'tkazmasdan sarflangan AI vaqtni qayd etish (vaqt tugaganda yoki
+    sahifadan chiqishda flush). seconds_used'ga qo'shiladi."""
+    elapsed_seconds: int = 0
+    local_date: Optional[str] = None
+
+
 class SpeakingChatModel(BaseModel):
     """AI speaking partnyorga so'rov (SPEAKING_PARTNER_SPEC.md)."""
     source: str = "unit"               # "unit" | "favorites"
