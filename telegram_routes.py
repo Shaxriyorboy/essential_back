@@ -130,6 +130,22 @@ def _handle_message(msg: dict):
     if not chat_id:
         return
 
+    # Admin: berilgan tarifni bekor qilish — /cancel email@example.com
+    # (foydalanuvchini 'free'ga qaytaradi). Faqat admin chatdan ishlaydi.
+    if text.startswith("/cancel"):
+        if chat_id != str(ADMIN_CHAT_ID):
+            _send(chat_id, "Bu buyruq faqat admin uchun.")
+            return
+        parts = text.split(maxsplit=1)
+        email = parts[1].strip().lower() if len(parts) > 1 else ""
+        if not EMAIL_RE.match(email):
+            _send(chat_id, "Foydalanish: <code>/cancel email@example.com</code>\n"
+                           "(o'sha foydalanuvchining ilovaga kirgan emaili)")
+            return
+        ok, info = _revoke_tier(email)
+        _send(chat_id, ("✅ " if ok else "⚠️ ") + f"<code>{email}</code> — {info}")
+        return
+
     if text.startswith("/start") or text.lower() in ("/help", "menu", "tarif", "tariff"):
         _pending_tier.pop(chat_id, None)
         _send(chat_id, _welcome_text(), reply_markup=_tariff_keyboard())
@@ -217,8 +233,11 @@ def _handle_callback(cb: dict):
             return
         ok, info = _grant_tier(email, tier, days)
         _answer_callback(cb_id, info)
-        suffix = (f"\n\n✅ <b>{TARIFFS.get(tier, {}).get('title', tier)} berildi</b> "
-                  f"({email})" if ok else f"\n\n⚠️ {info}")
+        if ok:
+            suffix = (f"\n\n✅ <b>{TARIFFS.get(tier, {}).get('title', tier)} berildi</b> "
+                      f"({email})\nBekor qilish: <code>/cancel {email}</code>")
+        else:
+            suffix = f"\n\n⚠️ {info}"
         _edit_text(chat_id, message_id, (msg.get("text") or "") + suffix)
         return
 
@@ -238,6 +257,21 @@ def _grant_tier(email: str, tier: str, days: int):
         user.tier_expires_at = datetime.now(timezone.utc) + timedelta(days=days)
         db.commit()
         return True, f"{tier} berildi"
+    finally:
+        db.close()
+
+
+def _revoke_tier(email: str):
+    """Email egasining tarifini bekor qiladi — 'free'ga qaytaradi. (ok, xabar)."""
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.email.ilike(email.strip())).first()
+        if user is None:
+            return False, "Bu email bilan foydalanuvchi topilmadi"
+        user.tier = "free"
+        user.tier_expires_at = None
+        db.commit()
+        return True, "tarif bekor qilindi (free)"
     finally:
         db.close()
 
