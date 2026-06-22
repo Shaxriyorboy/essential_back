@@ -261,16 +261,29 @@ async def telegram_webhook(request: Request,
     return {"ok": True}
 
 
+def _public_base_url() -> str:
+    """Hosting bergan public URL. Render -> RENDER_EXTERNAL_URL (to'liq URL),
+    Railway -> RAILWAY_PUBLIC_DOMAIN (faqat domen, https:// qo'shamiz).
+    PUBLIC_BASE_URL bilan qo'lda ham berish mumkin."""
+    base = os.environ.get("PUBLIC_BASE_URL") or os.environ.get("RENDER_EXTERNAL_URL")
+    if base:
+        return base
+    domain = os.environ.get("RAILWAY_PUBLIC_DOMAIN", "")
+    if domain:
+        return domain if domain.startswith("http") else f"https://{domain}"
+    return ""
+
+
 @telegram_router.post("/set-webhook")
 def set_webhook(url: str = None, x_admin_secret: str = Header(default="")):
     """Webhook URL'ni qo'lda ro'yxatdan o'tkazadi (X-Admin-Secret bilan himoyalangan).
 
-    url berilmasa RENDER_EXTERNAL_URL ishlatiladi."""
+    url berilmasa hosting bergan public URL (Render/Railway) ishlatiladi."""
     if not ADMIN_SECRET or x_admin_secret != ADMIN_SECRET:
         raise HTTPException(status_code=403, detail="Admin huquqi kerak")
-    base = url or os.environ.get("RENDER_EXTERNAL_URL", "")
+    base = url or _public_base_url()
     if not base:
-        raise HTTPException(status_code=400, detail="url yo'q (RENDER_EXTERNAL_URL ham yo'q)")
+        raise HTTPException(status_code=400, detail="url yo'q (public URL topilmadi)")
     hook = base.rstrip("/") + "/telegram/webhook"
     payload = {"url": hook, "allowed_updates": ["message", "callback_query"]}
     if WEBHOOK_SECRET:
@@ -279,8 +292,8 @@ def set_webhook(url: str = None, x_admin_secret: str = Header(default="")):
 
 
 def ensure_webhook():
-    """Startup'da webhook'ni avtomatik ro'yxatdan o'tkazadi (Render uchun)."""
-    base = os.environ.get("RENDER_EXTERNAL_URL", "")
+    """Startup'da webhook'ni avtomatik ro'yxatdan o'tkazadi (Render/Railway)."""
+    base = _public_base_url()
     if not (BOT_TOKEN and base):
         return
     hook = base.rstrip("/") + "/telegram/webhook"
