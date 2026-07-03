@@ -11,6 +11,8 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.encoders import jsonable_encoder
+from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from datetime import timedelta
@@ -209,6 +211,61 @@ def _envelope(success, code, message, data):
     )
 
 
+def _get_or_create_usage(db: Session, user_id: int, day: str) -> AiUsage:
+    """(user, day) yozuvini oladi; bo'lmasa yaratadi. Bir vaqtda kelgan
+    /chat va /consume ikkalasi ham yaratmoqchi bo'lsa — unique constraint
+    tufayli biri xato beradi; uni ushlab qayta o'qiymiz."""
+    usage = (
+        db.query(AiUsage)
+        .filter(AiUsage.user_id == user_id, AiUsage.date == day)
+        .first()
+    )
+    if usage is not None:
+        return usage
+    usage = AiUsage(user_id=user_id, date=day, count=0, seconds_used=0)
+    db.add(usage)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        usage = (
+            db.query(AiUsage)
+            .filter(AiUsage.user_id == user_id, AiUsage.date == day)
+            .first()
+        )
+    return usage
+
+
+def _bump_usage(db: Session, user_id: int, day: str, elapsed: int,
+                inc_count: bool) -> int:
+    """`seconds_used` ni ATOMIK (SQL ifoda bilan) oshiradi va yangi qiymatni
+    qaytaradi.
+
+    MUHIM: `usage.seconds_used = old + elapsed` (Python'da o'qib-yozish) o'rniga
+    SQL `seconds_used = seconds_used + :elapsed` ishlatamiz. Aks holda vaqt 0 ga
+    yetgan payt bir vaqtda kelgan /chat va /consume so'rovlari bir-birining
+    o'sishini ustidan yozib yuborardi (lost update) — server kam hisoblab, qaytib
+    kirganda ~5s "qolgan" ko'rinardi."""
+    _get_or_create_usage(db, user_id, day)
+    updates = {
+        AiUsage.seconds_used: func.coalesce(AiUsage.seconds_used, 0) + elapsed,
+    }
+    if inc_count:
+        updates[AiUsage.count] = func.coalesce(AiUsage.count, 0) + 1
+    (
+        db.query(AiUsage)
+        .filter(AiUsage.user_id == user_id, AiUsage.date == day)
+        .update(updates, synchronize_session=False)
+    )
+    db.commit()
+    row = (
+        db.query(AiUsage)
+        .filter(AiUsage.user_id == user_id, AiUsage.date == day)
+        .first()
+    )
+    return int(row.seconds_used or 0) if row else 0
+
+
 @speaking_router.post('/chat')
 def speaking_chat(
     payload: SpeakingChatModel,
@@ -257,13 +314,9 @@ def speaking_chat(
 
     # 5) Faqat MUVAFFAQIYATLI javobdan keyin vaqt + hisoblagichni yangilaymiz.
     #    elapsed_seconds aldashni cheklash uchun [0, MAX_TURN_SECONDS] ga qisiladi.
+    #    ATOMIK oshiramiz (lost update bo'lmasin) — pastdagi _bump_usage'ga qarang.
     elapsed = max(0, min(int(payload.elapsed_seconds or 0), MAX_TURN_SECONDS))
-    if usage is None:
-        usage = AiUsage(user_id=user.id, date=day, count=0, seconds_used=0)
-        db.add(usage)
-    usage.count = (usage.count or 0) + 1
-    usage.seconds_used = (usage.seconds_used or 0) + elapsed
-    db.commit()
+    used_now = _bump_usage(db, user.id, day, elapsed, inc_count=True)
 
     # 6) Javob (Gemini natijasi + tarif/vaqt meta)
     data = {
@@ -274,8 +327,8 @@ def speaking_chat(
         "level": level,
         "target_word_count": len(words[:MAX_TARGET_WORDS]),
     }
-    data.update(_quota_data(user, usage.seconds_used, limit,
-                            limit_reached=usage.seconds_used >= limit))
+    data.update(_quota_data(user, used_now, limit,
+                            limit_reached=used_now >= limit))
     return _envelope(True, 200, "Hammasi yaxshi", data)
 
 
@@ -315,17 +368,8 @@ def speaking_consume(
     day = _usage_date(payload)  # chat bilan bir xil kun (row) — local_date yoki UTC
     limit = daily_limit_seconds(user)
     elapsed = max(0, min(int(payload.elapsed_seconds or 0), MAX_TURN_SECONDS))
-    usage = (
-        db.query(AiUsage)
-        .filter(AiUsage.user_id == user.id, AiUsage.date == day)
-        .first()
-    )
-    if usage is None:
-        usage = AiUsage(user_id=user.id, date=day, count=0, seconds_used=0)
-        db.add(usage)
-    usage.seconds_used = (usage.seconds_used or 0) + elapsed
-    db.commit()
-    used = usage.seconds_used or 0
+    # ATOMIK oshiramiz — /chat bilan bir vaqtda kelsa ham yo'qolmasin.
+    used = _bump_usage(db, user.id, day, elapsed, inc_count=False)
     return _envelope(True, 200, "Hammasi yaxshi",
                      _quota_data(user, used, limit, limit_reached=used >= limit))
 
