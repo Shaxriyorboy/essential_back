@@ -181,6 +181,28 @@ class AiUsage(Base):
     )
 
 
+class SpeakingHistory(Base):
+    """AI speaking partnyor suhbat tarixi (per-user, per-suhbat).
+
+    Har bir turn (foydalanuvchi gapi va AI javobi) alohida qator sifatida
+    saqlanadi. `conversation_key` suhbatni AJRATADI — unit kesimida
+    "unit:{unit_id}", sevimlilar uchun "favorites". Shu tufayli har unit o'z
+    suhbatini eslab qoladi va foydalanuvchi qaytib kirganda o'sha joydan davom
+    etadi. Bu YANGI jadval — `create_all` uni avtomatik yaratadi.
+
+    `corrections` — faqat AI (model) javobida, tuzatishlar JSON matn ko'rinishida.
+    """
+    __tablename__ = 'speaking_history'
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey('users.id'), index=True)
+    conversation_key = Column(String, index=True)  # "unit:12" | "favorites"
+    role = Column(String)                           # "user" | "model"
+    text = Column(Text)
+    corrections = Column(Text, nullable=True)       # JSON: [{original,fixed,note}]
+    created_at = Column(
+        DateTime, default=lambda: datetime.now(timezone.utc), index=True)
+
+
 class Word(Base):
     __tablename__ = 'word'
     id = Column(Integer, primary_key=True)

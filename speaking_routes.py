@@ -5,9 +5,11 @@ Dizayn hujjati: essential ilovasi repo'sidagi SPEAKING_PARTNER_SPEC.md.
 Context (system prompt + USER + TARGET WORDS) SHU YERDA quriladi (app emas) —
 shunda promptni app yangilamasdan, faqat backend deploy qilib o'zgartirsa bo'ladi.
 """
+import json
 import os
 import re
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.encoders import jsonable_encoder
@@ -22,7 +24,7 @@ from fastapi import Header
 from auth import get_current_user
 from database import get_db
 from gemini import GeminiError, generate_chat
-from models import AiUsage, Book, Unit, User, UserFavorite, Word
+from models import AiUsage, Book, SpeakingHistory, Unit, User, UserFavorite, Word
 from schemes import SpeakingChatModel, SpeakingConsumeModel
 from tiers import daily_limit_seconds, effective_tier, model_for, TIER_DAILY_SECONDS
 
@@ -30,6 +32,10 @@ speaking_router = APIRouter(prefix='/speaking')
 
 # Bitta turn'da qo'shilishi mumkin bo'lgan eng ko'p vaqt (aldashni cheklash).
 MAX_TURN_SECONDS = 180
+
+# Gemini kontekstiga (va qaytariladigan tarixga) qo'shiladigan eng ko'p xabar —
+# promptni cheklaydi. Har (user, suhbat) uchun DB'da shu miqdorda qator saqlanadi.
+MAX_HISTORY_MESSAGES = 20
 
 # Admin panel (essential_admin) uchun maxfiy kalit. Railway'da ADMIN_SECRET
 # bilan o'rnatiladi; admin panel uni X-Admin-Secret header'da yuboradi.
@@ -195,8 +201,9 @@ def _build_system_instruction(user, level, native, label, words) -> str:
 
 
 def _build_contents(messages) -> list:
+    # Faqat oxirgi MAX_HISTORY_MESSAGES ta xabar — prompt cheksiz o'smasin.
     contents = []
-    for m in messages:
+    for m in messages[-MAX_HISTORY_MESSAGES:]:
         role = "model" if m.role == "model" else "user"
         contents.append({"role": role, "parts": [{"text": m.text}]})
     # Gemini oxirgi turn "user" bo'lishini kutadi; bo'sh yoki model bilan
@@ -204,6 +211,89 @@ def _build_contents(messages) -> list:
     if not contents or contents[-1]["role"] != "user":
         contents.append({"role": "user", "parts": [{"text": _GREETING_KICK}]})
     return contents
+
+
+def _conversation_key(source: str, unit_id) -> str:
+    """Suhbatni ajratuvchi kalit — unit kesimida alohida, sevimlilar alohida."""
+    if source == "unit" and unit_id is not None:
+        return f"unit:{unit_id}"
+    return "favorites"
+
+
+def _load_history(db: Session, user_id: int, key: str, limit: int):
+    """Suhbatning oxirgi `limit` ta xabari (xronologik tartibda)."""
+    rows = (
+        db.query(SpeakingHistory)
+        .filter(
+            SpeakingHistory.user_id == user_id,
+            SpeakingHistory.conversation_key == key,
+        )
+        .order_by(SpeakingHistory.id.desc())
+        .limit(limit)
+        .all()
+    )
+    rows.reverse()  # eng eskisi birinchi
+    return rows
+
+
+def _history_to_dicts(rows) -> list:
+    out = []
+    for r in rows:
+        item = {"role": r.role, "text": r.text}
+        if r.role == "model" and r.corrections:
+            try:
+                item["corrections"] = json.loads(r.corrections)
+            except (ValueError, TypeError):
+                item["corrections"] = []
+        else:
+            item["corrections"] = []
+        out.append(item)
+    return out
+
+
+def _persist_turn(db: Session, user_id: int, key: str,
+                  user_text: str, model_text: str, corrections) -> None:
+    """Bitta turn'ni (foydalanuvchi gapi + AI javobi) saqlaydi va suhbatni
+    oxirgi MAX_HISTORY_MESSAGES ta xabar bilan cheklaydi (eskisini o'chiradi).
+
+    Xatolik bo'lsa suhbat oqimini buzmaslik uchun jimgina o'tkazib yuboriladi
+    (saqlash — asosiy javobning muvaffaqiyatiga to'sqinlik qilmasligi kerak)."""
+    try:
+        if user_text:
+            db.add(SpeakingHistory(
+                user_id=user_id, conversation_key=key,
+                role="user", text=user_text))
+        db.add(SpeakingHistory(
+            user_id=user_id, conversation_key=key, role="model",
+            text=model_text or "",
+            corrections=json.dumps(corrections or []),
+        ))
+        db.commit()
+
+        # Eski xabarlarni tozalash — faqat oxirgi N qolsin.
+        keep_ids = [
+            r.id for r in db.query(SpeakingHistory.id)
+            .filter(
+                SpeakingHistory.user_id == user_id,
+                SpeakingHistory.conversation_key == key,
+            )
+            .order_by(SpeakingHistory.id.desc())
+            .limit(MAX_HISTORY_MESSAGES)
+            .all()
+        ]
+        if keep_ids:
+            (
+                db.query(SpeakingHistory)
+                .filter(
+                    SpeakingHistory.user_id == user_id,
+                    SpeakingHistory.conversation_key == key,
+                    ~SpeakingHistory.id.in_(keep_ids),
+                )
+                .delete(synchronize_session=False)
+            )
+            db.commit()
+    except Exception:
+        db.rollback()
 
 
 def _today_utc() -> str:
@@ -329,6 +419,16 @@ def speaking_chat(
     elapsed = max(0, min(int(payload.elapsed_seconds or 0), MAX_TURN_SECONDS))
     used_now = _bump_usage(db, user.id, day, elapsed, inc_count=True)
 
+    # 5.1) Suhbat tarixini saqlaymiz (unit/favorites kesimida) — qaytib kirganda
+    #      foydalanuvchi shu joydan davom etadi. Faqat YANGI turn saqlanadi:
+    #      oxirgi user gapi (bo'lsa) + AI javobi.
+    key = _conversation_key(payload.source, payload.unit_id)
+    new_user_text = ""
+    if payload.messages and payload.messages[-1].role == "user":
+        new_user_text = payload.messages[-1].text
+    _persist_turn(db, user.id, key, new_user_text,
+                  result.get("reply", ""), result.get("corrections", []))
+
     # 6) Javob (Gemini natijasi + tarif/vaqt meta)
     data = {
         "reply": result.get("reply", ""),
@@ -362,6 +462,41 @@ def speaking_quota(
     used = (usage.seconds_used or 0) if usage else 0
     return _envelope(True, 200, "Hammasi yaxshi",
                      _quota_data(user, used, limit, limit_reached=used >= limit))
+
+
+@speaking_router.get('/history')
+def speaking_history(
+    source: str = "unit",
+    unit_id: int = None,
+    limit: int = MAX_HISTORY_MESSAGES,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Suhbatning oxirgi xabarlari (unit/favorites kesimida).
+
+    Speaking sahifasi ochilganda ishlatiladi — eski suhbat ko'rsatiladi va
+    foydalanuvchi shu joydan davom etadi. Daraja va target so'z sonini ham
+    qaytaradi (resume'da header darrov to'ldirilsin).
+    """
+    key = _conversation_key(source, unit_id)
+    limit = max(1, min(int(limit or MAX_HISTORY_MESSAGES), MAX_HISTORY_MESSAGES))
+    rows = _load_history(db, user.id, key, limit)
+    messages = _history_to_dicts(rows)
+
+    level = ""
+    target_word_count = 0
+    try:
+        shim = SimpleNamespace(source=source, unit_id=unit_id)
+        words, level, _label = _words_and_level(db, user, shim)
+        target_word_count = len(words[:MAX_TARGET_WORDS])
+    except HTTPException:
+        pass
+
+    return _envelope(True, 200, "Hammasi yaxshi", {
+        "messages": messages,
+        "level": level,
+        "target_word_count": target_word_count,
+    })
 
 
 @speaking_router.post('/consume')
