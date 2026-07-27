@@ -21,6 +21,17 @@ STAGE_UP_THRESHOLD = 2              # darajani oshirish uchun ketma-ket to'g'ri
 # Faza 1 ning butun qiymati aynan o'sha mashqda. Shuning uchun har yangi
 # darajada qisqa intervaldan qayta boshlanadi.
 STAGE_UP_STEP_BACK = 2
+
+# So'z MAX darajaga yetguncha O'SHA KUNI qayta-qayta chiqadi (kun oralig'isiz).
+# Ya'ni xohlagan foydalanuvchi bitta kunda so'zni Recognise -> Recall -> Produce
+# gacha olib chiqa oladi.
+#
+# ESLATMA (mahsulot qarori): xotira nuqtai nazaridan takrorlashlar orasida kun
+# oralig'i bo'lgani kuchliroq eslab qolishni beradi. Bu yerda ataylab tezlik
+# tanlangan — foydalanuvchini "yetar, ertaga kel" deb to'xtatmaslik uchun.
+# Oqibati: daraja raqamlari qisman faollikni ham aks ettiradi.
+# MAX darajaga yetgach normal SRS oraliqlari ishlaydi.
+SAME_DAY_UNTIL_MAX_STAGE = True
 EASE_START, EASE_MIN, EASE_MAX = 250, 130, 300
 MAX_STAGE_PHASE1 = 2                # Faza 1 da 2-darajadan yuqoriga chiqmaymiz
 TYPO_TOLERANCE_MIN_LEN = 5          # shu uzunlikdan katta so'zlarda 1 xato kechiriladi
@@ -184,6 +195,13 @@ def next_state(current: dict, correct: bool, local_date: str,
         # Nolga tushirish jazolovchi va foydalanuvchini yo'qotadi.
         stage = max(stage - 1, 0)
         interval_days = 1
+
+    # So'z hali MAX darajaga yetmagan bo'lsa — O'SHA KUNI qayta chiqadi.
+    # Shu tufayli foydalanuvchi xohlasa bitta o'tirishda so'zni Recognise dan
+    # Produce gacha olib chiqa oladi va hech qanday "ertaga kel" to'sig'i yo'q.
+    # MAX darajaga yetgach normal oraliqlar boshlanadi (uzoq muddatli saqlanish).
+    if SAME_DAY_UNTIL_MAX_STAGE and stage < max_stage:
+        interval_days = 0
 
     return {
         "stage": stage,

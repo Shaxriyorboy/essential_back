@@ -13,13 +13,13 @@ import random
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.encoders import jsonable_encoder
-from sqlalchemy import and_, func
+from sqlalchemy import and_, func, tuple_
 from sqlalchemy.orm import Session
 
 import srs
 from auth import get_current_user
 from database import get_db
-from models import Book, Unit, User, UserWord, Word
+from models import Book, Unit, UnitCompletion, User, UserWord, Word
 from quiz_routes import pick_distractors
 from schemes import ReviewSubmitModel
 from streak import close_day
@@ -32,7 +32,10 @@ review_router = APIRouter(
 
 DEFAULT_NEW_LIMIT = 8       # kuniga nechta YANGI so'z kiritiladi
 DEFAULT_REVIEW_LIMIT = 25   # kuniga nechta takrorlash ko'rsatiladi
-GOAL_MIN_ITEMS = 10         # kunni (streakni) yopish uchun minimal javob soni
+# Kunni (streakni) yopish uchun bugun kamida shuncha TURLI so'z ishlangan
+# bo'lishi kerak. DEFAULT_NEW_LIMIT bilan tenglashtirilgan: standart sessiyani
+# oxirigacha bajargan foydalanuvchi streakini oladi.
+GOAL_MIN_ITEMS = 8
 EASY_START_COUNT = 3        # sessiya boshidagi "oson" (takrorlash) elementlar
 
 
@@ -75,6 +78,122 @@ def _build_item(stage: int, word: Word, pool: list) -> dict:
         random.shuffle(options)
         item["options"] = options
     return item
+
+
+def _as_naive(dt):
+    """tz-aware va naive datetime'larni solishtirish uchun bir ko'rinishga keltiradi.
+    (SQLite naive, Postgres aware qaytarishi mumkin — to'g'ridan-to'g'ri
+    solishtirish TypeError beradi.)"""
+    if dt is None:
+        return None
+    return dt.replace(tzinfo=None) if dt.tzinfo is not None else dt
+
+
+def _current_unit_id(db: Session, user: User):
+    """Foydalanuvchi OXIRGI ishlagan unit.
+
+    Ikkita manba solishtiriladi va kechrog'i olinadi:
+      - SRS'ga oxirgi kirgan so'zning uniti (`UserWord.first_seen_at`)
+      - Kitoblar tabida oxirgi tugatilgan unit (`UnitCompletion.completed_at`)
+
+    Ikkinchisi muhim: foydalanuvchi Kitoblar tabida 12-unitni ishlagan bo'lsa,
+    "Bugun" sessiyasi ham o'sha yerdan davom etishi kerak — avval sessiya bu
+    tanlovni umuman bilmasdi va har doim 1-kitobdan berardi.
+
+    Hech qanday faoliyat bo'lmasa `None` (eng boshidan boshlanadi).
+    """
+    candidates = []
+
+    row = (
+        db.query(Word.unit_id, UserWord.first_seen_at)
+        .join(UserWord, UserWord.word_id == Word.id)
+        .filter(UserWord.user_id == user.id)
+        .order_by(UserWord.first_seen_at.desc())
+        .first()
+    )
+    if row and row[0] is not None and row[1] is not None:
+        candidates.append((_as_naive(row[1]), row[0]))
+
+    row = (
+        db.query(UnitCompletion.unit_id, UnitCompletion.completed_at)
+        .filter(UnitCompletion.user_id == user.id)
+        .order_by(UnitCompletion.completed_at.desc())
+        .first()
+    )
+    if row and row[0] is not None and row[1] is not None:
+        candidates.append((_as_naive(row[1]), row[0]))
+
+    if not candidates:
+        return None
+    return max(candidates)[0 + 1]
+
+
+def _pick_new_words(db: Session, user: User, limit: int, book_id=None) -> list:
+    """Yangi (hali ko'rilmagan) so'zlarni tanlaydi.
+
+    Qoida:
+      1. Oxirgi ishlagan unitdan DAVOM etadi
+      2. U unit tugagan bo'lsa — keyingi unitlarga o'tadi
+      3. Umuman faoliyat bo'lmasa — eng boshidan (1-kitob, 1-unit)
+      4. Oxiriga yetgan bo'lsa — qolgan o'tkazib yuborilganlarini oladi
+    """
+    if limit <= 0:
+        return []
+
+    def unseen_query():
+        q = (
+            db.query(Word)
+            .join(Unit, Unit.id == Word.unit_id)
+            .join(Book, Book.id == Unit.book_id)
+            .outerjoin(
+                UserWord,
+                and_(UserWord.word_id == Word.id, UserWord.user_id == user.id),
+            )
+            .filter(UserWord.id.is_(None))
+        )
+        return q.filter(Book.id == book_id) if book_id is not None else q
+
+    picked = []
+    current_unit = _current_unit_id(db, user)
+
+    if current_unit is not None:
+        # 1) Joriy unitning qolgan so'zlari
+        picked = (
+            unseen_query()
+            .filter(Word.unit_id == current_unit)
+            .order_by(Word.id)
+            .limit(limit)
+            .all()
+        )
+        if len(picked) < limit:
+            # 2) Joriy unitdan KEYINGI unitlar
+            pos = (
+                db.query(Book.id, Unit.id)
+                .join(Unit, Unit.book_id == Book.id)
+                .filter(Unit.id == current_unit)
+                .first()
+            )
+            if pos is not None:
+                after = unseen_query().filter(
+                    tuple_(Book.id, Unit.id) > tuple_(pos[0], pos[1])
+                )
+                picked += (
+                    after.order_by(Book.id, Unit.id, Word.id)
+                    .limit(limit - len(picked))
+                    .all()
+                )
+
+    if len(picked) < limit:
+        # 3/4) Boshidan (yangi foydalanuvchi) yoki o'tkazib yuborilganlar
+        got = {w.id for w in picked}
+        rest = unseen_query().order_by(Book.id, Unit.id, Word.id).limit(limit * 3).all()
+        for w in rest:
+            if w.id not in got:
+                picked.append(w)
+                if len(picked) >= limit:
+                    break
+
+    return picked[:limit]
 
 
 def _interleave(due_items: list, new_items: list) -> list:
@@ -120,20 +239,8 @@ def get_today(
         .all()
     )
 
-    # 2) Yangi so'zlar — hali ko'rilmaganlari, kitob/unit tartibida
-    new_q = (
-        db.query(Word)
-        .join(Unit, Unit.id == Word.unit_id)
-        .join(Book, Book.id == Unit.book_id)
-        .outerjoin(
-            UserWord,
-            and_(UserWord.word_id == Word.id, UserWord.user_id == user.id),
-        )
-        .filter(UserWord.id.is_(None))
-    )
-    if book_id is not None:
-        new_q = new_q.filter(Book.id == book_id)
-    new_words = new_q.order_by(Book.id, Unit.id, Word.id).limit(new_limit).all()
+    # 2) Yangi so'zlar — oxirgi ishlagan unitdan davom etadi
+    new_words = _pick_new_words(db, user, new_limit, book_id)
 
     # 3) `mcq` uchun distraktor fondi — element so'zi bilan BIR XIL unitdan.
     #    Barcha kerakli unitlarni BITTA so'rovda olamiz (N+1 bo'lmasin).
@@ -267,19 +374,37 @@ def submit_reviews(
     # Yangi `due_date` qiymatlari quyidagi so'rovga ko'rinishi uchun flush
     db.flush()
 
-    # Kunlik maqsad ikki yo'l bilan bajariladi:
-    #   1) kamida GOAL_MIN_ITEMS ta so'z takrorlandi, YOKI
-    #   2) bugunga muddati kelgan so'z umuman qolmadi (ish tugadi).
-    # Ikkinchi shart kam so'z qolgan foydalanuvchini jazolamaslik uchun: agar
-    # navbatda bor-yo'g'i 4 ta so'z bo'lsa, 4 tasini bajarish ham kunni yopadi.
-    remaining_due = (
+    # Kunlik maqsad: BUGUN kamida GOAL_MIN_ITEMS ta TURLI so'z ishlangan bo'lsa.
+    #
+    # Hisob kumulyativ — kun davomida bir necha sessiya qilgan foydalanuvchining
+    # mehnati qo'shiladi (5 ta + 5 ta = 10).
+    #
+    # MUHIM: bu yerda avval "muddati kelgan so'z qolmadimi" deb tekshirilardi.
+    # Same-day takrorlash yoqilgach o'sha shart buzildi — so'zlar o'sha kuniyoq
+    # qayta navbatga tushgani uchun "qolmadi" holati deyarli yuzaga kelmaydi va
+    # streak umuman yopilmay qoldi. Endi mezon sof mehnat hajmi.
+    answered_today = (
         db.query(func.count(UserWord.id))
         .filter(UserWord.user_id == user.id,
-                UserWord.due_date.isnot(None),
-                UserWord.due_date <= body.local_date)
+                UserWord.last_review_date == body.local_date)
         .scalar()
     ) or 0
-    goal_met = total > 0 and (total >= GOAL_MIN_ITEMS or remaining_due == 0)
+
+    # Zaxira: butun korpus tugagan bo'lsa (yangi so'z ham, muddati kelgani ham
+    # yo'q) kam ish bilan ham kun yopiladi — foydalanuvchi aybdor emas.
+    unseen_left = (
+        db.query(func.count(Word.id))
+        .outerjoin(
+            UserWord,
+            and_(UserWord.word_id == Word.id, UserWord.user_id == user.id),
+        )
+        .filter(UserWord.id.is_(None))
+        .scalar()
+    ) or 0
+
+    goal_met = total > 0 and (
+        answered_today >= GOAL_MIN_ITEMS or unseen_left == 0
+    )
 
     streak = {
         "current_streak": user.current_streak or 0,

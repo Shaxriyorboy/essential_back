@@ -80,14 +80,15 @@ sd = r["data"]
 check("8/8 to'g'ri", sd["correct"] == 8 and sd["total"] == 8, sd)
 check("streak 1 ga oshdi", sd["streak"]["current_streak"] == 1 and sd["streak"]["increased"], sd["streak"])
 check("goal bajarildi", sd["goal_met"] is True)
-check("keyingi due 3 kundan keyin", all(x["next_due"] == d(3) for x in sd["results"]),
+# SAME-DAY: so'z MAX darajaga yetguncha o'sha kuni qayta chiqadi
+check("O'SHA KUNI qayta navbatga tushadi", all(x["next_due"] == d() for x in sd["results"]),
       [x["next_due"] for x in sd["results"]][:3])
 
 # --- 2. O'sha kuni qayta kirish -------------------------------------------
 print("\n2) O'sha kuni qayta ochish — takrorlash qolmagan")
 r = client.get("/reviews/today", params={"local_date": d()}, headers=H).json()
-check("due=0 (bugungi ish tugadi)", r["data"]["due_count"] == 0, r["data"])
-check("yangi so'zlar keladi", r["data"]["new_count"] == 8, r["data"])
+check("o'sha 8 so'z qayta navbatda", r["data"]["due_count"] == 8, r["data"])
+check("USTIGA yangi so'zlar ham keladi (cheklov yo'q)", r["data"]["new_count"] == 8, r["data"])
 
 r = client.get("/reviews/stats", params={"local_date": d()}, headers=H).json()
 st = r["data"]
@@ -148,7 +149,7 @@ r = client.post("/reviews/submit", json={"local_date": d(4), "answers": [bad]}, 
 res = r["data"]["results"][0]
 check("xato deb baholandi", res["correct"] is False, res)
 check("daraja bitta pastga", res["stage"] == before - 1, f"{before} -> {res['stage']}")
-check("ertaga qaytadi", res["next_due"] == d(5), res)
+check("xatodan keyin ham o'sha kuni qaytadi", res["next_due"] == d(4), res)
 check("to'g'ri javob qaytarildi", "expected" in res, res)
 
 # --- 5. Imlo toleransi ----------------------------------------------------
@@ -227,6 +228,72 @@ spread = {x.due_date for x in rows}
 check(f"due sanalar yoyilgan ({len(spread)} xil sana)", len(spread) > 5, sorted(spread)[:5])
 res2 = migrate(SessionLocal())
 check("idempotent (takror qo'shmaydi)", res2["inserted"] == 0, res2)
+
+# --- 8. TO'LIQ CHEKSIZ: bitta kunda Recognise -> Produce ---------------------
+print("\n8) Bitta kunda 0-darajadan Produce gacha")
+db5 = SessionLocal()
+u3 = User(email="fast@test.com", name="Fast", google_sub="fast-sub")
+db5.add(u3); db5.commit(); db5.refresh(u3)
+H3 = {"Authorization": "Bearer " + create_access_token(u3.id)}
+DAY = d(40)
+
+rv = client.get("/reviews/today", params={"local_date": DAY}, headers=H3).json()
+w = rv["data"]["items"][0]
+wid, wen = w["word_id"], w["word_en"]
+stages = []
+for step in range(4):
+    rv = client.get("/reviews/today", params={"local_date": DAY}, headers=H3).json()
+    it = next((x for x in rv["data"]["items"] if x["word_id"] == wid), None)
+    if it is None:
+        break
+    stages.append((it["stage"], it["exercise"]))
+    ans = ({"word_id": wid, "exercise": "recall_meaning", "known": True}
+           if it["exercise"] == "recall_meaning"
+           else {"word_id": wid, "exercise": it["exercise"], "answer": wen})
+    client.post("/reviews/submit", json={"local_date": DAY, "answers": [ans]}, headers=H3)
+
+print("   bosqichlar:", " -> ".join(f"{s}:{e}" for s, e in stages))
+check("bitta kunda 4 marta chiqdi", len(stages) == 4, stages)
+check("mcq -> recall -> produce ketma-ketligi",
+      [s for s, _ in stages] == [0, 0, 1, 1] or [s for s, _ in stages] == [0, 1, 1, 2],
+      stages)
+db6 = SessionLocal()
+final = db6.query(UW).filter_by(user_id=u3.id, word_id=wid).first()
+check(f"o'sha kuni Produce (stage 2) ga yetdi", final.stage == 2, final.stage)
+check("Produce'ga yetgach kun oralig'i boshlanadi", final.due_date > DAY,
+      f"due={final.due_date} day={DAY}")
+
+# --- 9. Yangi so'zlar OXIRGI ISHLAGAN unitdan --------------------------------
+print("\n9) Yangi so'zlar oxirgi ishlagan unitdan keladi")
+db7 = SessionLocal()
+u4 = User(email="unit@test.com", name="Unit", google_sub="unit-sub")
+db7.add(u4); db7.commit(); db7.refresh(u4)
+H4 = {"Authorization": "Bearer " + create_access_token(u4.id)}
+
+units = db7.query(Unit).order_by(Unit.id).all()
+target = units[3]                      # 4-unit — boshidan ancha uzoq
+db7.add(UnitCompletion(user_id=u4.id, unit_id=target.id, score=100))
+db7.commit()
+
+rv = client.get("/reviews/today", params={"local_date": d(50)}, headers=H4).json()
+ids = [i["word_id"] for i in rv["data"]["items"]]
+target_word_ids = {w.id for w in db7.query(Word).filter(Word.unit_id == target.id).all()}
+from_target = sum(1 for i in ids if i in target_word_ids)
+check(f"so'zlar {target.id}-unitdan keldi (1-unitdan emas)",
+      from_target == len(ids) and len(ids) > 0,
+      f"{from_target}/{len(ids)} ta shu unitdan")
+
+# Yangi (hech narsa ishlamagan) foydalanuvchi eng boshidan boshlaydi
+u5 = User(email="new@test.com", name="New", google_sub="new-sub")
+db7.add(u5); db7.commit(); db7.refresh(u5)
+H5 = {"Authorization": "Bearer " + create_access_token(u5.id)}
+rv = client.get("/reviews/today", params={"local_date": d(50)}, headers=H5).json()
+first_unit_ids = {w.id for w in db7.query(Word).filter(Word.unit_id == units[0].id).all()}
+ids2 = [i["word_id"] for i in rv["data"]["items"]]
+check("yangi user 1-unitdan boshlaydi",
+      all(i in first_unit_ids for i in ids2) and len(ids2) > 0,
+      ids2[:5])
+
 
 # --- Yakun ----------------------------------------------------------------
 print("\n" + "=" * 60)
