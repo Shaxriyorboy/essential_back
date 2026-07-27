@@ -1,7 +1,7 @@
 """SRS oqimini uchdan-uchgacha tekshirish (alohida sqlite bazasida).
 
 Model: bir kunlik sessiya = BITTA UNIT, bosqichma-bosqich (etap).
-    Recognise (mcq) -> Recall (karta) -> Produce (yozish)
+    Recognise (mcq) -> Recall (ipuchali yozish) -> Produce (yozish)
 Har etapda unitning BARCHA so'zlari qatnashadi.
 
 Ishga tushirish:  ./venv/bin/python test_srs_flow.py
@@ -88,8 +88,6 @@ def session(H, day, **kw):
 
 def answer_for(item, stage, correct=True):
     ex = srs.exercise_for_stage(stage)
-    if ex == "recall_meaning":
-        return {"word_id": item["word_id"], "exercise": ex, "known": correct}
     return {"word_id": item["word_id"], "exercise": ex,
             "answer": item["word_en"] if correct else "zzzqqq"}
 
@@ -123,6 +121,10 @@ check("20/20 to'g'ri", r["correct"] == 20, r["correct"])
 check("hammasi darajani ko'tardi", len(r["stage_ups"]) == 20, len(r["stage_ups"]))
 
 s2 = session(H, d())
+check("1-bosqich mashqi ipuchali yozish",
+      srs.exercise_for_stage(1) == "type_hinted", srs.exercise_for_stage(1))
+check("eski self-rated tur baholanadi (offline navbat uchun)",
+      srs.LEGACY_SELF_RATED == "recall_meaning")
 check("endi hammasi 1-darajada (Recall)",
       all(w["stage"] == 1 for w in s2["words"]),
       sorted({w["stage"] for w in s2["words"]}))

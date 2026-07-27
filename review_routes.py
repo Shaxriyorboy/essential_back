@@ -397,11 +397,12 @@ def get_session(
 def _grade(answer, word: Word) -> bool:
     """Bitta javobni baholaydi.
 
-    `recall_meaning` — o'zini baholash (bazadagi o'zbekcha tarjima ko'p variantli:
-    "qo'rqqan, cho'chigan" — yozilganini avtomatik baholab bo'lmaydi).
-    Qolganlari — `word_en` bilan solishtiriladi (imlo toleransi bilan).
+    Hamma mashq turi `word_en` bilan solishtiriladi (imlo toleransi bilan).
+
+    `recall_meaning` — ESKI tur (o'zini baholash). Endi ishlatilmaydi, lekin
+    offline navbatda qolgan javoblar uchun qo'llab-quvvatlanadi.
     """
-    if answer.exercise == "recall_meaning":
+    if answer.exercise == srs.LEGACY_SELF_RATED:
         return bool(answer.known)
     return srs.is_answer_correct(answer.answer, word.word_en)
 

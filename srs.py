@@ -44,11 +44,23 @@ TYPO_TOLERANCE_MIN_LEN = 5          # shu uzunlikdan katta so'zlarda 1 xato kech
 # hal qiladi. 3 va 4-darajalar Faza 3/4 da yoqiladi.
 EXERCISE_BY_STAGE = {
     0: "mcq",              # 4 variantli test (UZ -> EN)
-    1: "recall_meaning",   # karta + o'zini baholash (EN -> UZ)
-    2: "type_production",  # yozish (UZ -> EN)  <- passiv/aktiv chegarasi
+    1: "type_hinted",      # yozish, birinchi harf berilgan (UZ -> EN)
+    2: "type_production",  # yozish, yordamsiz (UZ -> EN)  <- aktiv chegarasi
     3: "gap_fill",         # Faza 3
     4: "speaking",         # Faza 4
 }
+
+# Uchala bosqich ham BITTA yo'nalishda (UZ -> EN) va har bosqichda yordam
+# kamayadi: variantlar -> birinchi harf -> hech narsa.
+#
+# Avval 1-bosqich `recall_meaning` edi (EN -> UZ karta + "Bildim/Bilmadim").
+# Ikki nuqsoni bor edi: (1) yo'nalish sakrardi, shuning uchun bosqichlar
+# farqi sezilmasdi; (2) o'zini baholashda xato qilishning iloji yo'q edi —
+# "Bildim" ni eslamasdan ham bosaverish mumkin, ya'ni bosqich Recognise'dan
+# OSONROQ bo'lib qolgandi.
+
+# Eski javoblar (offline navbatda qolgan) baholanishi uchun qo'llab-quvvatlanadi
+LEGACY_SELF_RATED = "recall_meaning"
 
 
 def exercise_for_stage(stage: int) -> str:
