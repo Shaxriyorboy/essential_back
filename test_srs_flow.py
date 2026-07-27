@@ -173,6 +173,44 @@ check("Produce'ga yetgach kun oralig'i boshlandi",
       all(x.due_date > d() for x in rows),
       sorted({x.due_date for x in rows})[:3])
 
+# --- 3c. BOSQICH HISOBI har etapdan keyin ------------------------------------
+print("\n3c) Bosqich hisobi har etapdan keyin to'g'ri bo'lsin")
+uidp, Hp = new_user("progress@t.com")
+DAYP = d(60)
+expected = [1, 2, 3, 4, 5]
+for stage in range(5):
+    sp = session(Hp, DAYP)
+    run_etap(Hp, DAYP, sp["words"], stage)
+    stp = client.get("/reviews/stats", params={"local_date": DAYP},
+                     headers=Hp).json()["data"]
+    got = f'{stp["today_done"]}/{stp["today_goal"]}'
+    want = f'{expected[stage]}/5'
+    check(f"{stage}-etapdan keyin {want}", got == want, got)
+
+# --- 3d. "Ish qolmadi" != "hamma bosqich bajarildi" ------------------------
+print("\n3d) Muddati surilgan, lekin bosqichlari tugamagan unit")
+uidl, Hl = new_user("legacy@t.com")
+DAYL = d(70)
+sl = session(Hl, DAYL)
+# 3 ta etapni bajaramiz -> so'zlar 3-darajada
+for stage in range(3):
+    sx = session(Hl, DAYL)
+    run_etap(Hl, DAYL, sx["words"], stage)
+# Muddatni ERTAGA suramiz (eski model qoldig'iga taqlid) — endi unitda
+# "bugungi ish" qolmaydi, lekin 4 va 5-bosqich bajarilmagan
+dbl = SessionLocal()
+for uw in dbl.query(UserWord).filter_by(user_id=uidl).all():
+    uw.due_date = d(71)
+dbl.commit()
+
+stl = client.get("/reviews/stats", params={"local_date": DAYL},
+                 headers=Hl).json()["data"]
+check("ish qolmasa ham hisob 5/5 BO'LMAYDI",
+      stl["today_done"] == 3 and stl["today_goal"] == 5,
+      f'{stl["today_done"]}/{stl["today_goal"]}')
+check("unit_done_today bayrog'i baribir to'g'ri",
+      stl["unit_done_today"] is True, stl.get("unit_done_today"))
+
 # --- 4. KUNIGA BITTA UNIT ---------------------------------------------------
 print("\n4) Kuniga bitta unit — yangisi ertaga ochiladi")
 s4today = session(H, d())

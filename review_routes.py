@@ -677,10 +677,19 @@ def get_stats(
         .scalar()
     ) or 0
 
+    # Bugungi unit tugatilgan bo'lsa `_session_unit` None qaytaradi —
+    # u holda OXIRGI ishlagan unit bo'yicha hisoblaymiz, aks holda 0/5
+    # ko'rsatib qo'yardik.
+    progress_unit_id = unit.id if unit is not None else _current_unit_id(db, user)
     stages_done, stages_total = _unit_stage_progress(
-        db, user, unit.id if unit is not None else None, local_date)
-    if unit_done_today:
-        stages_done = stages_total
+        db, user, progress_unit_id, local_date)
+
+    # MUHIM: bu yerda avval `if unit_done_today: stages_done = stages_total`
+    # turardi. U NOTO'G'RI edi — "bugun ish qolmadi" degani "hamma bosqich
+    # bajarildi" degani emas. So'zlar 3-darajada turib, muddati ertaga
+    # surilgan bo'lishi mumkin (masalan bosqichlar soni o'zgargan bo'lsa) —
+    # o'shanda Fluent bajarilmagan bo'la turib 5/5 ko'rsatilardi va Fluent
+    # etapini bajarish hisobni umuman o'zgartirmasdi.
 
     return _ok("Statistika", {
         # Kunlik maqsad endi BOSQICH bilan o'lchanadi, so'z soni bilan emas.
