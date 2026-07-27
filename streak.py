@@ -8,6 +8,17 @@ from models import StreakDay, User
 QUIZ_PASS_PERCENT = 80
 AI_PASS_PERCENT = 70
 
+# Kunni yopa oladigan manbalar.
+#   "quiz"   — unit quizi (faqat YANGI unit tugatilganda)
+#   "ai"     — AI speaking partnyor bilan suhbat
+#   "review" — kunlik SRS takrorlash sessiyasi
+#
+# MUHIM: "review" aynan STREAK DEVORINI yo'q qilish uchun qo'shildi. Avval kun
+# faqat yangi unit tugatilganda yopilardi — 180 ta unit tugagach eng sodiq
+# foydalanuvchi streakini boshqa hech qachon davom ettira olmasdi. Endi kunlik
+# takrorlash sessiyasi ham kunni yopadi, ya'ni streak cheksiz oziqlanadi.
+STREAK_SOURCES = ("quiz", "ai", "review")
+
 
 def _safe_date(s: str):
     """ "YYYY-MM-DD" -> date. Noto'g'ri bo'lsa None."""

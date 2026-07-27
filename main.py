@@ -8,6 +8,7 @@ from quiz_routes import quiz_router
 from stats_routes import stats_router
 from data_routes import data_router
 from progress_routes import progress_router
+from review_routes import review_router
 from device_routes import device_router
 from speaking_routes import speaking_router
 from telegram_routes import telegram_router, ensure_webhook
@@ -38,6 +39,10 @@ def _ensure_schema():
             # AI kunlik vaqt hisobi (ai_usage jadvali mavjud bo'lsa)
             conn.execute(text(
                 "ALTER TABLE ai_usage ADD COLUMN IF NOT EXISTS seconds_used INTEGER DEFAULT 0"))
+            # SRS: kunlik navbat so'rovi (user_id + due_date) tez bo'lishi uchun
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_user_words_due "
+                "ON user_words (user_id, due_date)"))
         elif dialect == "sqlite":
             ucols = [r[1] for r in conn.execute(text("PRAGMA table_info(users)"))]
             if "apple_sub" not in ucols:
@@ -49,6 +54,10 @@ def _ensure_schema():
             acols = [r[1] for r in conn.execute(text("PRAGMA table_info(ai_usage)"))]
             if acols and "seconds_used" not in acols:
                 conn.execute(text("ALTER TABLE ai_usage ADD COLUMN seconds_used INTEGER DEFAULT 0"))
+            # SRS: kunlik navbat so'rovi (user_id + due_date) tez bo'lishi uchun
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_user_words_due "
+                "ON user_words (user_id, due_date)"))
 
 app.add_middleware(
     CORSMiddleware,
@@ -69,6 +78,7 @@ app.include_router(quiz_router)
 app.include_router(stats_router)
 app.include_router(data_router)
 app.include_router(progress_router)
+app.include_router(review_router)
 app.include_router(device_router)
 app.include_router(speaking_router)
 app.include_router(account_router)

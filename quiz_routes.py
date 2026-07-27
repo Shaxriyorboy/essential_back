@@ -19,15 +19,31 @@ async def get_quiz():
     return {"message": "Bu sahifa savollar uchun"}
 
 
+def pick_distractors(word: Word, pool: list, n: int = 3) -> list:
+    """Noto'g'ri variantlarni BIR XIL so'z turkumidan tanlaydi.
+
+    Avval tasodifiy tanlanardi: to'g'ri javob sifat bo'lib, qolgan uchtasi fe'l
+    chiqishi mumkin edi — user so'zni bilmasa ham grammatikaga qarab topardi.
+    `word_classes` bazada 100% to'ldirilgan, shuni ishlatamiz.
+
+    Bir xil turkumda yetarli so'z bo'lmasa, qolgani umumiy fonddan to'ldiriladi.
+    """
+    same_pos = [w for w in pool
+                if w.id != word.id and w.word_classes == word.word_classes]
+    if len(same_pos) >= n:
+        chosen = random.sample(same_pos, n)
+    else:
+        same_ids = {w.id for w in same_pos}
+        rest = [w for w in pool if w.id != word.id and w.id not in same_ids]
+        chosen = same_pos + random.sample(rest, min(n - len(same_pos), len(rest)))
+    return [w.word_en for w in chosen]
+
+
 def build_question(word: Word, all_words: list, options_count: int = 4):
     """Bitta so'z uchun savol va variantlar tuzadi"""
     correct_answer = word.word_en
 
-    # Boshqa so'zlardan noto'g'ri javoblarni tanlaymiz
-    other_words = [w.word_en for w in all_words if w.id != word.id]
-    wrong_answers = random.sample(other_words, min(options_count - 1, len(other_words)))
-
-    options = wrong_answers + [correct_answer]
+    options = pick_distractors(word, all_words, options_count - 1) + [correct_answer]
     random.shuffle(options)
 
     return {

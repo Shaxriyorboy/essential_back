@@ -179,3 +179,34 @@ class WordModel(BaseModel):
                 "isFavorite": False,
             }
         }
+
+
+class ReviewAnswerItem(BaseModel):
+    """Kunlik takrorlash sessiyasidagi bitta javob (SRS_SPEC.md, 4.2).
+
+    `answer` — `mcq` va `type_production` uchun (foydalanuvchi yozgan/tanlagan matn).
+    `known`  — `recall_meaning` uchun (o'zini baholash: bildim/bilmadim).
+    """
+    word_id: int
+    exercise: str                      # "mcq" | "recall_meaning" | "type_production"
+    answer: Optional[str] = None
+    known: Optional[bool] = None
+
+
+class ReviewSubmitModel(BaseModel):
+    """Sessiya natijalari — BATCH yuboriladi (har savolda so'rov qilinmaydi)."""
+    local_date: str                    # client mahalliy sanasi "YYYY-MM-DD"
+    answers: List[ReviewAnswerItem]
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "local_date": "2026-07-27",
+                "answers": [
+                    {"word_id": 421, "exercise": "mcq", "answer": "afraid"},
+                    {"word_id": 87, "exercise": "recall_meaning", "known": True},
+                    {"word_id": 512, "exercise": "type_production",
+                     "answer": "convincing"},
+                ],
+            }
+        }

@@ -203,6 +203,57 @@ class SpeakingHistory(Base):
         DateTime, default=lambda: datetime.now(timezone.utc), index=True)
 
 
+class UserWord(Base):
+    """Foydalanuvchining bitta so'z bo'yicha o'zlashtirish holati (SRS).
+
+    So'z "o'rganilgan/o'rganilmagan" emas — uning DARAJASI bor. Daraja qaysi
+    mashq berilishini belgilaydi (SRS_SPEC.md, 1-bo'lim):
+        0 tanish (4 variantli test)
+        1 ma'noni eslash (karta + o'zini baholash)
+        2 ishlab chiqarish (yozish)   <- passiv/aktiv chegarasi
+        3 kontekst (gap to'ldirish)   <- Faza 3
+        4 erkin nutq (speaking)       <- Faza 4
+
+    `step`  — INTERVALS massividagi indeks (takrorlash oralig'i).
+    `ease`  — SM-2 koeffitsienti ×100 (250 = 2.50). Butun son: SQLite va
+              Postgres o'rtasida float farqlari bo'lmasin.
+    `due_date` — foydalanuvchining MAHALLIY sanasi "YYYY-MM-DD" (StreakDay va
+              AiUsage bilan bir xil konvensiya).
+
+    Bu YANGI jadval — `create_all` uni avtomatik yaratadi (qo'lda migratsiya
+    kerakmas). Indeks `main.py:_ensure_schema()` da qo'shiladi.
+    """
+    __tablename__ = 'user_words'
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey('users.id'), index=True)
+    word_id = Column(Integer, ForeignKey('word.id'), index=True)
+
+    stage = Column(Integer, default=0)          # 0..4
+    stage_reps = Column(Integer, default=0)     # joriy darajadagi to'g'ri javoblar
+    step = Column(Integer, default=0)           # INTERVALS indeksi
+    ease = Column(Integer, default=250)         # ×100
+    interval_days = Column(Integer, default=0)  # ko'rsatish/debug uchun
+    due_date = Column(String, index=True)       # "YYYY-MM-DD" (client local)
+    # Oxirgi takrorlash MAHALLIY sanasi. "Bugun nechta bajardim" ni aniq
+    # hisoblash uchun — UTC `updated_at` bilan vaqt zonasi chalkashligi bo'lmasin.
+    last_review_date = Column(String, index=True)
+
+    reps = Column(Integer, default=0)           # jami javoblar
+    lapses = Column(Integer, default=0)         # jami xatolar
+    active_uses = Column(Integer, default=0)    # Faza 4: suhbatda erkin ishlatgan
+
+    first_seen_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+    __table_args__ = (
+        UniqueConstraint('user_id', 'word_id', name='uq_user_word_srs'),
+    )
+
+
 class Word(Base):
     __tablename__ = 'word'
     id = Column(Integer, primary_key=True)
