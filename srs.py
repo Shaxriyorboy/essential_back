@@ -37,7 +37,10 @@ STAGE_UP_STEP_BACK = 2
 # MAX darajaga yetgach normal SRS oraliqlari ishlaydi.
 SAME_DAY_UNTIL_MAX_STAGE = True
 EASE_START, EASE_MIN, EASE_MAX = 250, 130, 300
-MAX_STAGE_PHASE1 = 2                # Faza 1 da 2-darajadan yuqoriga chiqmaymiz
+# Eng yuqori MAJBURIY daraja. 3 = In context (gap-fill).
+# 4-daraja (Fluent) bu yerga kirmaydi: u suhbatdan to'planadi, etap emas —
+# suhbatni 20 ta so'zning hammasini qamrashga majburlab bo'lmaydi.
+MAX_STAGE_PHASE1 = 3
 TYPO_TOLERANCE_MIN_LEN = 5          # shu uzunlikdan katta so'zlarda 1 xato kechiriladi
 
 # Daraja -> mashq turi. Client shu satrga qarab qaysi widget'ni ko'rsatishini
@@ -46,14 +49,15 @@ EXERCISE_BY_STAGE = {
     0: "mcq",              # 4 variantli test (UZ -> EN)
     1: "listen",           # eshitib yozish (audio -> EN)
     2: "type_production",  # yozish, yordamsiz (UZ -> EN)  <- aktiv chegarasi
-    3: "gap_fill",         # Faza 3
-    4: "speaking",         # Faza 4
+    3: "gap_fill",         # misol gapdagi katakni to'ldirish
+    4: "speaking",         # suhbatda erkin ishlatish (etap emas)
 }
 
 # Uchala bosqich UCHTA BOSHQA ko'nikmani o'lchaydi:
-#   Recognise  ko'r va tanla       yozma tanish
-#   Listen     eshit va yoz        TOVUSH shakli — suhbat uchun zarur
-#   Produce    ma'nodan yoz        ishlab chiqarish
+#   Recognise   ko'r va tanla       yozma tanish
+#   Listen      eshit va yoz        TOVUSH shakli — suhbat uchun zarur
+#   Produce     ma'nodan yoz        ishlab chiqarish
+#   In context  gapdagi katak       QO'LLASH — grammatika/kollokatsiya
 #
 # Avval 1-bosqich `recall_meaning` (EN->UZ karta + "Bildim") edi, keyin
 # ipuchali yozish sinaldi. Ikkalasi ham Produce bilan BIR XIL operatsiya

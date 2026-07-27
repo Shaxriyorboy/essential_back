@@ -1,7 +1,7 @@
 """SRS oqimini uchdan-uchgacha tekshirish (alohida sqlite bazasida).
 
 Model: bir kunlik sessiya = BITTA UNIT, bosqichma-bosqich (etap).
-    Recognise (mcq) -> Listen (eshitib yozish) -> Produce (yozish)
+    Recognise -> Listen -> Produce -> In context (gap-fill)
 Har etapda unitning BARCHA so'zlari qatnashadi.
 
 Ishga tushirish:  ./venv/bin/python test_srs_flow.py
@@ -111,7 +111,7 @@ check("unitning HAMMA so'zi keldi", len(s["words"]) == 20, len(s["words"]))
 check("hammasi 0-darajada", all(w["stage"] == 0 for w in s["words"]))
 check("mcq variantlari bor", all(len(w["options"]) == 4 for w in s["words"]))
 check("takrorlash bo'sh (birinchi kun)", s["review_items"] == [])
-check("max_stage = 2", s["max_stage"] == 2)
+check("max_stage = 3", s["max_stage"] == 3)
 
 # --- 2. Etap tugagach hamma so'z bir daraja ko'tariladi ---------------------
 print("\n2) Recognise etapi -> hamma so'z Recall darajasiga")
@@ -129,22 +129,31 @@ check("endi hammasi 1-darajada (Recall)",
       all(w["stage"] == 1 for w in s2["words"]),
       sorted({w["stage"] for w in s2["words"]}))
 
-# --- 3. Uchala etap bitta kunda --------------------------------------------
-print("\n3) Recall va Produce etaplari — o'sha kuni")
+# --- 3. Hamma etap bitta kunda ---------------------------------------------
+print("\n3) Listen, Produce, In context etaplari — o'sha kuni")
 run_etap(H, d(), s2["words"], 1)
 s3 = session(H, d())
 check("hammasi 2-darajada (Produce)",
       all(w["stage"] == 2 for w in s3["words"]),
       sorted({w["stage"] for w in s3["words"]}))
 
-items, r = run_etap(H, d(), s3["words"], 2)
-check("Produce etapi ham bajarildi", r["total"] == 20, r["total"])
+run_etap(H, d(), s3["words"], 2)
+s3b = session(H, d())
+check("hammasi 3-darajada (In context)",
+      all(w["stage"] == 3 for w in s3b["words"]),
+      sorted({w["stage"] for w in s3b["words"]}))
+gaps = [w for w in s3b["words"] if w.get("gap_sentence")]
+check(f"gap_sentence tuzildi ({len(gaps)}/20)", len(gaps) >= 18, len(gaps))
+check("katak gapda bor", all("_____" in w["gap_sentence"] for w in gaps))
+
+items, r = run_etap(H, d(), s3b["words"], 3)
+check("In context etapi bajarildi", r["total"] == 20, r["total"])
 check("kunlik maqsad bajarildi", r["goal_met"] is True, r)
 check("streak 1 ga oshdi", r["streak"]["current_streak"] == 1, r["streak"])
 
 dbx = SessionLocal()
 rows = dbx.query(UserWord).filter_by(user_id=uid).all()
-check("hamma so'z MAX darajada", all(x.stage == 2 for x in rows),
+check("hamma so'z MAX darajada", all(x.stage == 3 for x in rows),
       sorted({x.stage for x in rows}))
 check("Produce'ga yetgach kun oralig'i boshlandi",
       all(x.due_date > d() for x in rows),
@@ -202,11 +211,11 @@ dbz = SessionLocal()
 uw = dbz.query(UserWord).filter_by(
     user_id=uid, word_id=long_w["word_id"]).first()
 if uw is None:
-    uw = UserWord(user_id=uid, word_id=long_w["word_id"], stage=2, stage_reps=0,
+    uw = UserWord(user_id=uid, word_id=long_w["word_id"], stage=3, stage_reps=0,
                   step=1, ease=250, interval_days=1, due_date=d(1), reps=1)
     dbz.add(uw)
 else:
-    uw.stage = 2
+    uw.stage = 3
     uw.due_date = d(1)
 dbz.commit()
 w = long_w["word_en"]
@@ -252,8 +261,8 @@ st = client.get("/reviews/stats", params={"local_date": d(20)},
 check("today_goal unit hajmiga bog'landi", st["unit_size"] == 20,
       st.get("unit_size"))
 check("unit nomi qaytdi", st.get("unit_name") is not None, st.get("unit_name"))
-check("bosqich hisobi: 1/3 (faqat Recognise)",
-      st["today_done"] == 1 and st["today_goal"] == 3,
+check("bosqich hisobi: 1/4 (faqat Recognise)",
+      st["today_done"] == 1 and st["today_goal"] == 4,
       f'{st["today_done"]}/{st["today_goal"]}')
 check("so'z hisobi alohida maydonda", st["words_done_today"] == 20,
       st.get("words_done_today"))

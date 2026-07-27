@@ -20,6 +20,7 @@ import srs
 from auth import get_current_user
 from database import get_db
 from models import Book, Unit, UnitCompletion, User, UserWord, Word
+from gapfill import build_gap
 from quiz_routes import pick_distractors
 from schemes import ReviewSubmitModel
 from streak import close_day
@@ -76,6 +77,15 @@ def _build_item(stage: int, word: Word, pool: list) -> dict:
         options = pick_distractors(word, pool, 3) + [word.word_en]
         random.shuffle(options)
         item["options"] = options
+    elif exercise == "gap_fill":
+        gap = build_gap(word.word_en, word.example)
+        if gap is None:
+            # ~1.5% so'zda misol gapda so'z topilmaydi (noto'g'ri fe'l yoki
+            # OCR axlati). Ularga yozish mashqini beramiz — bosqich baribir
+            # o'tiladi, foydalanuvchi farqni sezmaydi.
+            item["exercise"] = "type_production"
+        else:
+            item["gap_sentence"] = gap["sentence"]
     return item
 
 
@@ -404,6 +414,14 @@ def _grade(answer, word: Word) -> bool:
     """
     if answer.exercise == srs.LEGACY_SELF_RATED:
         return bool(answer.known)
+
+    if answer.exercise == "gap_fill":
+        # Gapdagi shakl ham (`hunted`), asosiy shakl ham (`hunt`) qabul
+        # qilinadi — grammatikani bilmagani uchun jazolamaymiz.
+        gap = build_gap(word.word_en, word.example)
+        if gap is not None and srs.is_answer_correct(answer.answer, gap["answer"]):
+            return True
+
     return srs.is_answer_correct(answer.answer, word.word_en)
 
 
