@@ -266,7 +266,49 @@ check("bosqich hisobi: 1/4 (faqat Recognise)",
       f'{st["today_done"]}/{st["today_goal"]}')
 check("so'z hisobi alohida maydonda", st["words_done_today"] == 20,
       st.get("words_done_today"))
-check("aktiv so'z 0 (Faza 4)", st["active_words"] == 0)
+check("aktiv so'z 0 (hali suhbat bo'lmagan)", st["active_words"] == 0)
+
+# --- 9b. FLUENT: suhbatda erkin ishlatish -----------------------------------
+print("\n9b) Fluent — suhbatda erkin ishlatilgan so'z 4-darajaga chiqadi")
+from speaking_routes import _record_active_uses, FLUENT_USES_REQUIRED
+dbf = SessionLocal()
+fl_words = dbf.query(Word).filter(Word.id.in_(
+    [x.word_id for x in dbf.query(UserWord).filter_by(user_id=uid).limit(3).all()]
+)).all()
+# Bu so'zlar 3-darajada (barcha yozma bosqichdan o'tgan)
+for uw in dbf.query(UserWord).filter(
+        UserWord.user_id == uid,
+        UserWord.word_id.in_([w.id for w in fl_words])).all():
+    uw.stage = 3
+    uw.active_uses = 0
+dbf.commit()
+
+names = [w.word_en for w in fl_words]
+p1 = _record_active_uses(SessionLocal(), uid, names, fl_words)
+check(f"1-marta ishlatilgach hali Fluent emas (kerak: {FLUENT_USES_REQUIRED})",
+      p1 == [], p1)
+p2 = _record_active_uses(SessionLocal(), uid, names, fl_words)
+check("2-martadan keyin Fluent'ga chiqdi", len(p2) == len(fl_words), p2)
+
+dbg = SessionLocal()
+check("daraja 4 ga ko'tarildi",
+      all((dbg.query(UserWord).filter_by(user_id=uid, word_id=w.id)
+           .first().stage) == 4 for w in fl_words))
+
+st2 = client.get("/reviews/stats", params={"local_date": d(20)},
+                 headers=H).json()["data"]
+check(f"active_words = {len(fl_words)}", st2["active_words"] == len(fl_words),
+      st2["active_words"])
+
+# SRS'ga kirmagan so'z Fluent bo'lmaydi
+unseen = dbg.query(Word).filter(~Word.id.in_(
+    [x.word_id for x in dbg.query(UserWord.word_id).filter_by(user_id=uid).all()]
+)).first()
+if unseen is not None:
+    r1 = _record_active_uses(SessionLocal(), uid, [unseen.word_en], [unseen])
+    r2 = _record_active_uses(SessionLocal(), uid, [unseen.word_en], [unseen])
+    check("yozma bosqichlardan o'tmagan so'z Fluent bo'lmaydi",
+          r1 == [] and r2 == [], (r1, r2))
 
 # --- 10. Migratsiya --------------------------------------------------------
 print("\n10) Migratsiya")

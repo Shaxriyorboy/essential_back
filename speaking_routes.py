@@ -24,7 +24,8 @@ from fastapi import Header
 from auth import get_current_user
 from database import get_db
 from gemini import GeminiError, generate_chat
-from models import AiUsage, Book, SpeakingHistory, Unit, User, UserFavorite, Word
+import srs
+from models import AiUsage, Book, SpeakingHistory, Unit, User, UserFavorite, Word, UserWord
 from schemes import SpeakingChatModel, SpeakingConsumeModel
 from tiers import daily_limit_seconds, effective_tier, model_for, TIER_DAILY_SECONDS
 
@@ -367,6 +368,62 @@ def _bump_usage(db: Session, user_id: int, day: str, elapsed: int,
     return int(row.seconds_used or 0) if row else 0
 
 
+
+# --- Fluent (4-daraja) ------------------------------------------------------
+
+# So'z Fluent'ga chiqishi uchun suhbatda shuncha marta SO'RALMASDAN ishlatilishi
+# kerak. 1 marta tasodif bo'lishi mumkin (AI so'zni o'zi aytgan bo'lsa,
+# foydalanuvchi takrorlab qo'yishi mumkin), 2 marta esa allaqachon ishonchli.
+FLUENT_USES_REQUIRED = 2
+
+# Fluent'ga chiqish uchun so'z kamida shu darajada bo'lishi kerak — ya'ni
+# barcha yozma bosqichlardan o'tgan bo'lsin.
+FLUENT_MIN_STAGE = 3
+
+
+def _record_active_uses(db: Session, user_id: int, used_words, all_words) -> list:
+    """Suhbatda ERKIN ishlatilgan so'zlarni qayd etadi.
+
+    `used_words` — Gemini qaytargan `target_words_used_by_user` (matn).
+    Ular so'z ID'lariga moslanadi va `UserWord.active_uses` oshiriladi.
+    Yetarli marta ishlatilgan va yozma bosqichlardan o'tgan so'z 4-darajaga
+    (Fluent) ko'tariladi.
+
+    Qaytadi: Fluent'ga endigina chiqqan so'z ID'lari.
+    """
+    if not used_words:
+        return []
+
+    wanted = {srs.normalize(w) for w in used_words if w}
+    matched = [w for w in all_words if srs.normalize(w.word_en) in wanted]
+    if not matched:
+        return []
+
+    rows = {
+        uw.word_id: uw
+        for uw in db.query(UserWord).filter(
+            UserWord.user_id == user_id,
+            UserWord.word_id.in_([w.id for w in matched]),
+        ).all()
+    }
+
+    promoted = []
+    for word in matched:
+        uw = rows.get(word.id)
+        # Hali SRS'ga kirmagan so'zni Fluent qilib bo'lmaydi — avval yozma
+        # bosqichlardan o'tsin.
+        if uw is None:
+            continue
+        uw.active_uses = (uw.active_uses or 0) + 1
+        if (uw.active_uses >= FLUENT_USES_REQUIRED
+                and (uw.stage or 0) >= FLUENT_MIN_STAGE
+                and (uw.stage or 0) < 4):
+            uw.stage = 4
+            promoted.append(word.id)
+    db.commit()
+    return promoted
+
+
 @speaking_router.post('/chat')
 def speaking_chat(
     payload: SpeakingChatModel,
@@ -429,11 +486,17 @@ def speaking_chat(
     _persist_turn(db, user.id, key, new_user_text,
                   result.get("reply", ""), result.get("corrections", []))
 
+    # 5.2) FLUENT: suhbatda erkin ishlatilgan so'zlarni qayd etamiz.
+    #      Bu ilovaning bosh metrikasi — "shuncha so'zni erkin ishlata olasan".
+    used_by_user = result.get("target_words_used_by_user", []) or []
+    newly_fluent = _record_active_uses(db, user.id, used_by_user, words)
+
     # 6) Javob (Gemini natijasi + tarif/vaqt meta)
     data = {
         "reply": result.get("reply", ""),
         "corrections": result.get("corrections", []),
-        "target_words_used_by_user": result.get("target_words_used_by_user", []),
+        "target_words_used_by_user": used_by_user,
+        "newly_fluent": newly_fluent,
         "target_words_introduced": result.get("target_words_introduced", []),
         "level": level,
         "target_word_count": len(words[:MAX_TARGET_WORDS]),

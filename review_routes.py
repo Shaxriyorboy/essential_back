@@ -620,13 +620,12 @@ def get_stats(
     ):
         by_stage[str(stage or 0)] = count
 
-    # Faza 4 da to'ladi: so'z 3-darajadan yuqori VA suhbatda erkin ishlatilgan.
-    # Hozir 0 qaytadi, lekin maydon hozirdan bo'lsin — client keyin o'zgarmaydi.
+    # ILOVANING BOSH METRIKASI: so'z 4-darajada — ya'ni barcha yozma
+    # bosqichlardan o'tgan VA suhbatda erkin ishlatilgan.
+    # Ko'tarilish `speaking_routes._record_active_uses()` da bo'ladi.
     active_words = (
         db.query(func.count(UserWord.id))
-        .filter(UserWord.user_id == user.id,
-                UserWord.stage >= 3,
-                UserWord.active_uses >= 2)
+        .filter(UserWord.user_id == user.id, UserWord.stage >= 4)
         .scalar()
     ) or 0
 
