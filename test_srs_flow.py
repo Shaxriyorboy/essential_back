@@ -110,6 +110,12 @@ check("unit qaytdi", s["unit"] is not None, s.get("unit"))
 check("unitning HAMMA so'zi keldi", len(s["words"]) == 20, len(s["words"]))
 check("hammasi 0-darajada", all(w["stage"] == 0 for w in s["words"]))
 check("mcq variantlari bor", all(len(w["options"]) == 4 for w in s["words"]))
+# Bosqichga xos ma'lumot BOSHIDANOQ kelishi kerak — etaplarni client quradi
+gaps0 = [w for w in s["words"] if w.get("gap_sentence")]
+check(f"0-darajadayoq gap_sentence keldi ({len(gaps0)}/20)", len(gaps0) >= 18,
+      len(gaps0))
+check("gap_answer ham keldi",
+      all(w.get("gap_answer") for w in s["words"] if w.get("gap_sentence")))
 check("takrorlash bo'sh (birinchi kun)", s["review_items"] == [])
 check("max_stage = 3", s["max_stage"] == 3)
 

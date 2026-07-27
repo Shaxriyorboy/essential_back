@@ -61,11 +61,10 @@ def _build_item(stage: int, word: Word, pool: list) -> dict:
     jadvali yo'q — foydalanuvchi faqat o'zini aldaydi. Baholash baribir
     serverda qayta bajariladi (`/reviews/submit`), ya'ni holat ishonchli.
     """
-    exercise = srs.exercise_for_stage(stage)
     item = {
         "word_id": word.id,
         "stage": stage,
-        "exercise": exercise,
+        "exercise": srs.exercise_for_stage(stage),
         "word_en": word.word_en,
         "word_uz": word.word_uz,
         "definition": word.definition,
@@ -73,24 +72,32 @@ def _build_item(stage: int, word: Word, pool: list) -> dict:
         "word_classes": word.word_classes,
         "example": word.example,
     }
-    if exercise == "mcq":
-        options = pick_distractors(word, pool, 3) + [word.word_en]
-        random.shuffle(options)
-        item["options"] = options
-    elif exercise == "gap_fill":
-        gap = build_gap(word.word_en, word.example)
-        if gap is None:
-            # ~1.5% so'zda misol gapda so'z topilmaydi (noto'g'ri fe'l yoki
-            # OCR axlati). Ularga yozish mashqini beramiz — bosqich baribir
-            # o'tiladi, foydalanuvchi farqni sezmaydi.
-            item["exercise"] = "type_production"
-        else:
-            item["gap_sentence"] = gap["sentence"]
-            # Gapdan olib tashlangan AYNAN shakl (`hunted`). Client darhol
-            # feedback ko'rsatishi uchun kerak — u `word_en` (`hunt`) bilan
-            # solishtirsa, to'g'ri javobni xato deb ko'rsatib qo'yardi va
-            # server bilan zid tushardi.
-            item["gap_answer"] = gap["answer"]
+
+    # MUHIM: bosqichga xos ma'lumot HAR DOIM yuboriladi, so'zning joriy
+    # darajasidan qat'i nazar.
+    #
+    # Sabab: etaplarni CLIENT quradi. Sessiya boshlanganda so'z 0-darajada
+    # bo'ladi, lekin o'sha sessiya ichida 3-darajagacha ko'tariladi — o'shanda
+    # unga gap kerak bo'ladi. Agar faqat joriy darajaga mos ma'lumot
+    # yuborsak, In context bosqichida ekran BO'SH chiqadi.
+    options = pick_distractors(word, pool, 3) + [word.word_en]
+    random.shuffle(options)
+    item["options"] = options
+
+    gap = build_gap(word.word_en, word.example)
+    if gap is None:
+        # ~1.5% so'zda misol gapda so'z topilmaydi (noto'g'ri fe'l yoki OCR
+        # axlati). Client bunday so'zga In context o'rniga yozish mashqini
+        # beradi — bosqich baribir o'tiladi, foydalanuvchi farqni sezmaydi.
+        item["gap_sentence"] = None
+        item["gap_answer"] = None
+    else:
+        item["gap_sentence"] = gap["sentence"]
+        # Gapdan olib tashlangan AYNAN shakl (`hunted`). Client darhol
+        # feedback ko'rsatishi uchun kerak — u `word_en` (`hunt`) bilan
+        # solishtirsa, to'g'ri javobni xato deb ko'rsatib qo'yardi.
+        item["gap_answer"] = gap["answer"]
+
     return item
 
 
