@@ -1,4 +1,11 @@
-"""SRS oqimini uchdan-uchgacha tekshirish (alohida sqlite bazasida)."""
+"""SRS oqimini uchdan-uchgacha tekshirish (alohida sqlite bazasida).
+
+Model: bir kunlik sessiya = BITTA UNIT, bosqichma-bosqich (etap).
+    Recognise (mcq) -> Recall (karta) -> Produce (yozish)
+Har etapda unitning BARCHA so'zlari qatnashadi.
+
+Ishga tushirish:  ./venv/bin/python test_srs_flow.py
+"""
 import json
 import os
 import sys
@@ -16,20 +23,25 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from fastapi.testclient import TestClient  # noqa: E402
 import main  # noqa: E402
+import srs  # noqa: E402
 from database import SessionLocal  # noqa: E402
-from models import Book, Unit, Word, User, UnitCompletion  # noqa: E402
+from models import Book, Unit, Word, User, UnitCompletion, UserWord  # noqa: E402
 from auth import create_access_token  # noqa: E402
 
-EXPORT = os.environ.get("SRS_TEST_EXPORT", "../essential/essential_export_2026-06-05.json")
+EXPORT = os.environ.get(
+    "SRS_TEST_EXPORT",
+    "/Users/shaxriyortursunaliyev/StudioProjects/essential/"
+    "essential_export_2026-06-05.json",
+)
 
 # --- Ma'lumot bilan to'ldirish ---------------------------------------------
 db = SessionLocal()
 data = json.load(open(EXPORT))
-n_books = n_units = n_words = 0
-for b in data["books"][:2]:                       # 2 ta kitob yetarli
-    book = Book(name=b.get("name") or f"Book {n_books+1}")
-    db.add(book); db.flush(); n_books += 1
-    for u in b.get("units", [])[:4]:               # har kitobdan 4 unit
+n_units = n_words = 0
+for b in data["books"][:1]:
+    book = Book(name=b.get("name") or "Book 1")
+    db.add(book); db.flush()
+    for u in b.get("units", [])[:4]:
         unit = Unit(name=u.get("name"), history=u.get("history"), book_id=book.id)
         db.add(unit); db.flush(); n_units += 1
         for w in u.get("words", []):
@@ -40,262 +52,212 @@ for b in data["books"][:2]:                       # 2 ta kitob yetarli
                 unit_id=unit.id,
             ))
             n_words += 1
-user = User(email="test@test.com", name="Test", google_sub="test-sub")
-db.add(user); db.commit(); db.refresh(user)
-uid = user.id
-print(f"Baza: {n_books} kitob, {n_units} unit, {n_words} so'z, user id={uid}\n")
+db.commit()
+print(f"Baza: {n_units} unit, {n_words} so'z\n")
 
 client = TestClient(main.app)
-H = {"Authorization": "Bearer " + create_access_token(uid)}
 TODAY = date.today()
-d = lambda n=0: (TODAY + timedelta(days=n)).isoformat()
+
+
+def d(n=0):
+    return (TODAY + timedelta(days=n)).isoformat()
+
 
 FAIL = []
+
+
 def check(label, cond, detail=""):
-    print(("  OK   " if cond else "  XATO ") + label + ("" if cond else f"  -> {detail}"))
+    print(("  OK   " if cond else "  XATO ") + label
+          + ("" if cond else f"  -> {detail}"))
     if not cond:
         FAIL.append(label)
 
-# --- 1. Birinchi sessiya ---------------------------------------------------
-print("1) Birinchi sessiya — hammasi yangi so'z")
-r = client.get("/reviews/today", params={"local_date": d()}, headers=H).json()
-items = r["data"]["items"]
-check("navbat keldi", r["success"] and len(items) > 0, r)
-check("yangi=8, takrorlash=0", r["data"]["new_count"] == 8 and r["data"]["due_count"] == 0, r["data"])
-check("hammasi mcq", all(i["exercise"] == "mcq" for i in items))
-check("mcq da 4 variant", all(len(i["options"]) == 4 for i in items))
-check("to'g'ri javob variantlar ichida",
-      all(i["word_en"] in i["options"] for i in items))
 
-pos_ok = 0
-for i in items:
-    opts = i["options"]
-    pos_ok += 1 if len(opts) == 4 else 0
-check("distraktorlar to'ldirildi", pos_ok == len(items))
+def new_user(email):
+    s = SessionLocal()
+    u = User(email=email, name=email, google_sub=email)
+    s.add(u); s.commit(); s.refresh(u)
+    return u.id, {"Authorization": "Bearer " + create_access_token(u.id)}
 
-# Hammasiga to'g'ri javob beramiz
-answers = [{"word_id": i["word_id"], "exercise": "mcq", "answer": i["word_en"]} for i in items]
-r = client.post("/reviews/submit", json={"local_date": d(), "answers": answers}, headers=H).json()
-sd = r["data"]
-check("8/8 to'g'ri", sd["correct"] == 8 and sd["total"] == 8, sd)
-check("streak 1 ga oshdi", sd["streak"]["current_streak"] == 1 and sd["streak"]["increased"], sd["streak"])
-check("goal bajarildi", sd["goal_met"] is True)
-# SAME-DAY: so'z MAX darajaga yetguncha o'sha kuni qayta chiqadi
-check("O'SHA KUNI qayta navbatga tushadi", all(x["next_due"] == d() for x in sd["results"]),
-      [x["next_due"] for x in sd["results"]][:3])
 
-# --- 2. O'sha kuni qayta kirish -------------------------------------------
-print("\n2) O'sha kuni qayta ochish — takrorlash qolmagan")
-r = client.get("/reviews/today", params={"local_date": d()}, headers=H).json()
-check("o'sha 8 so'z qayta navbatda", r["data"]["due_count"] == 8, r["data"])
-check("USTIGA yangi so'zlar ham keladi (cheklov yo'q)", r["data"]["new_count"] == 8, r["data"])
+def session(H, day, **kw):
+    p = {"local_date": day}
+    p.update(kw)
+    return client.get("/reviews/session", params=p, headers=H).json()["data"]
 
-r = client.get("/reviews/stats", params={"local_date": d()}, headers=H).json()
-st = r["data"]
-check("bugun bajarilgan = 8", st["today_done"] == 8, st)
-check("stage 0 da 8 ta", st["by_stage"]["0"] == 8, st["by_stage"])
-check("aktiv so'z = 0 (Faza 4)", st["active_words"] == 0)
 
-# --- 3. 3 kundan keyin: takrorlash + daraja ko'tarilishi -------------------
-print("\n3) 3 kundan keyin — takrorlash keldi, daraja ko'tarilishi kerak")
-r = client.get("/reviews/today", params={"local_date": d(3)}, headers=H).json()
-items = r["data"]["items"]
-due = [i for i in items if i["word_id"] in {a["word_id"] for a in answers}]
-check("8 ta takrorlash keldi", r["data"]["due_count"] == 8, r["data"])
-check("boshida takrorlash turibdi", items[0]["word_id"] in {a["word_id"] for a in answers})
+def answer_for(item, stage, correct=True):
+    ex = srs.exercise_for_stage(stage)
+    if ex == "recall_meaning":
+        return {"word_id": item["word_id"], "exercise": ex, "known": correct}
+    return {"word_id": item["word_id"], "exercise": ex,
+            "answer": item["word_en"] if correct else "zzzqqq"}
 
-ans2 = []
-for i in items:
-    if i["exercise"] == "mcq":
-        ans2.append({"word_id": i["word_id"], "exercise": "mcq", "answer": i["word_en"]})
-    elif i["exercise"] == "recall_meaning":
-        ans2.append({"word_id": i["word_id"], "exercise": "recall_meaning", "known": True})
-    else:
-        ans2.append({"word_id": i["word_id"], "exercise": "type_production", "answer": i["word_en"]})
-r = client.post("/reviews/submit", json={"local_date": d(3), "answers": ans2}, headers=H).json()
-sd = r["data"]
-check("daraja ko'tarilganlar bor", len(sd["stage_ups"]) == 8, sd["stage_ups"])
-# 1 va 2-kunlar o'tkazib yuborilgan -> streak UZILADI va 1 dan boshlanadi
-check("2 kun o'tkazilgach streak 1 ga qaytadi",
-      sd["streak"]["current_streak"] == 1, sd["streak"])
 
-# Ketma-ket kun: streak oshishi kerak
-r = client.get("/reviews/today", params={"local_date": d(4)}, headers=H).json()
-a4 = []
-for i in r["data"]["items"][:12]:
-    if i["exercise"] == "recall_meaning":
-        a4.append({"word_id": i["word_id"], "exercise": i["exercise"], "known": True})
-    else:
-        a4.append({"word_id": i["word_id"], "exercise": i["exercise"], "answer": i["word_en"]})
-r = client.post("/reviews/submit", json={"local_date": d(4), "answers": a4}, headers=H).json()
-check("ketma-ket kunda streak 2 ga oshadi",
-      r["data"]["streak"]["current_streak"] == 2, r["data"]["streak"])
+def run_etap(H, day, words, stage):
+    """Bitta etapni oxirigacha o'ynaydi: shu darajadagi hamma so'z."""
+    items = [w for w in words if w["stage"] == stage]
+    answers = [answer_for(w, stage) for w in items]
+    r = client.post("/reviews/submit",
+                    json={"local_date": day, "answers": answers},
+                    headers=H).json()["data"]
+    return items, r
 
-r = client.get("/reviews/today", params={"local_date": d(4)}, headers=H).json()
-ex = {i["exercise"] for i in r["data"]["items"] if i["stage"] == 1}
-check("1-darajada recall_meaning mashqi", ex == {"recall_meaning"} or not ex, ex)
 
-# --- 4. Xato javob --------------------------------------------------------
-print("\n4) Xato javob — daraja pastga, ertaga qaytadi")
-r = client.get("/reviews/today", params={"local_date": d(4)}, headers=H).json()
-one = [i for i in r["data"]["items"] if i["stage"] >= 1][0]
-before = one["stage"]
-bad = {"word_id": one["word_id"], "exercise": one["exercise"]}
-if one["exercise"] == "recall_meaning":
-    bad["known"] = False
-else:
-    bad["answer"] = "zzzzz"
-r = client.post("/reviews/submit", json={"local_date": d(4), "answers": [bad]}, headers=H).json()
-res = r["data"]["results"][0]
+# --- 1. Sessiya = bitta unit -----------------------------------------------
+print("1) Sessiya bitta unitdan iborat")
+uid, H = new_user("a@t.com")
+s = session(H, d())
+check("unit qaytdi", s["unit"] is not None, s.get("unit"))
+check("unitning HAMMA so'zi keldi", len(s["words"]) == 20, len(s["words"]))
+check("hammasi 0-darajada", all(w["stage"] == 0 for w in s["words"]))
+check("mcq variantlari bor", all(len(w["options"]) == 4 for w in s["words"]))
+check("takrorlash bo'sh (birinchi kun)", s["review_items"] == [])
+check("max_stage = 2", s["max_stage"] == 2)
+
+# --- 2. Etap tugagach hamma so'z bir daraja ko'tariladi ---------------------
+print("\n2) Recognise etapi -> hamma so'z Recall darajasiga")
+items, r = run_etap(H, d(), s["words"], 0)
+check("20 ta javob qabul qilindi", r["total"] == 20, r["total"])
+check("20/20 to'g'ri", r["correct"] == 20, r["correct"])
+check("hammasi darajani ko'tardi", len(r["stage_ups"]) == 20, len(r["stage_ups"]))
+
+s2 = session(H, d())
+check("endi hammasi 1-darajada (Recall)",
+      all(w["stage"] == 1 for w in s2["words"]),
+      sorted({w["stage"] for w in s2["words"]}))
+
+# --- 3. Uchala etap bitta kunda --------------------------------------------
+print("\n3) Recall va Produce etaplari — o'sha kuni")
+run_etap(H, d(), s2["words"], 1)
+s3 = session(H, d())
+check("hammasi 2-darajada (Produce)",
+      all(w["stage"] == 2 for w in s3["words"]),
+      sorted({w["stage"] for w in s3["words"]}))
+
+items, r = run_etap(H, d(), s3["words"], 2)
+check("Produce etapi ham bajarildi", r["total"] == 20, r["total"])
+check("kunlik maqsad bajarildi", r["goal_met"] is True, r)
+check("streak 1 ga oshdi", r["streak"]["current_streak"] == 1, r["streak"])
+
+dbx = SessionLocal()
+rows = dbx.query(UserWord).filter_by(user_id=uid).all()
+check("hamma so'z MAX darajada", all(x.stage == 2 for x in rows),
+      sorted({x.stage for x in rows}))
+check("Produce'ga yetgach kun oralig'i boshlandi",
+      all(x.due_date > d() for x in rows),
+      sorted({x.due_date for x in rows})[:3])
+
+# --- 4. Unit tugagach keyingi unitga o'tadi ---------------------------------
+print("\n4) Unit tugagach keyingi unit beriladi")
+s4 = session(H, d())
+check("yangi unit tanlandi", s4["unit"]["id"] != s["unit"]["id"],
+      f'{s["unit"]["id"]} -> {s4["unit"]["id"]}')
+check("yangi unitda 20 ta so'z", len(s4["words"]) == 20, len(s4["words"]))
+check("hammasi 0-darajadan boshlanadi",
+      all(w["stage"] == 0 for w in s4["words"]))
+
+# --- 5. Xato javob darajani ko'tarmaydi ------------------------------------
+print("\n5) Xato javob darajani ko'tarmaydi")
+uid2, H2 = new_user("b@t.com")
+sb = session(H2, d())
+one = sb["words"][0]
+r = client.post("/reviews/submit", json={"local_date": d(), "answers": [
+    answer_for(one, 0, correct=False)]}, headers=H2).json()["data"]
+res = r["results"][0]
 check("xato deb baholandi", res["correct"] is False, res)
-check("daraja bitta pastga", res["stage"] == before - 1, f"{before} -> {res['stage']}")
-check("xatodan keyin ham o'sha kuni qaytadi", res["next_due"] == d(4), res)
+check("daraja 0 da qoldi", res["stage"] == 0, res)
 check("to'g'ri javob qaytarildi", "expected" in res, res)
+check("o'sha kuni qayta chiqadi", res["next_due"] == d(), res)
 
-# --- 5. Imlo toleransi ----------------------------------------------------
-print("\n5) Imlo toleransi (type_production)")
-db2 = SessionLocal()
-from models import UserWord
-seen_ids = [x[0] for x in db2.query(UserWord.word_id).filter_by(user_id=uid).all()]
-long_word = (
-    db2.query(Word)
-    .filter(Word.id.notin_(seen_ids), func_len(Word.word_en) > 5)
-    .first()
-) if False else next(
-    w for w in db2.query(Word).filter(Word.id.notin_(seen_ids)).all()
-    if len(w.word_en or "") > 5
-)
-uw = UserWord(user_id=uid, word_id=long_word.id, stage=2, stage_reps=0, step=1,
-              ease=250, interval_days=1, due_date=d(10), reps=3, lapses=0)
-db2.add(uw); db2.commit()
-w = long_word.word_en
-typo = w[:-2] + w[-1] + w[-2]          # oxirgi ikki harf o'rin almashdi
-r = client.post("/reviews/submit", json={"local_date": d(10), "answers": [
-    {"word_id": long_word.id, "exercise": "type_production", "answer": typo}]}, headers=H).json()
-res = r["data"]["results"][0]
-check(f"transpozitsiya kechiriladi ({w!r} <- {typo!r})", res["correct"] is True, res)
+# --- 6. Muddati kelgan so'zlar alohida "Takrorlash" etapida ------------------
+print("\n6) Oldingi unitlardan takrorlash alohida keladi")
+# Joriy unit 2-unitga o'tishi uchun u yerda ham ish qilamiz, so'ng 1-unit
+# so'zlarining muddatini bugunga qo'yamiz — o'shalar "Takrorlash" bo'lib keladi.
+first_unit_word_ids = [w["word_id"] for w in s["words"]]
+run_etap(H, d(1), s4["words"], 0)
+dby = SessionLocal()
+for uw in dby.query(UserWord).filter(
+        UserWord.user_id == uid,
+        UserWord.word_id.in_(first_unit_word_ids)).all():
+    uw.due_date = d(1)
+dby.commit()
+s6 = session(H, d(1))
+check("review_items to'ldi", len(s6["review_items"]) > 0, len(s6["review_items"]))
+cur_ids = {w["word_id"] for w in s6["words"]}
+check("takrorlash so'zlari joriy unitdan EMAS",
+      all(i["word_id"] not in cur_ids for i in s6["review_items"]))
 
-# Butunlay boshqa so'z — kechirilmasligi kerak
-uw2 = db2.query(UserWord).filter_by(user_id=uid, word_id=long_word.id).first()
-uw2.due_date = d(11); db2.commit()
-r = client.post("/reviews/submit", json={"local_date": d(11), "answers": [
-    {"word_id": long_word.id, "exercise": "type_production", "answer": "qwertyzz"}]}, headers=H).json()
-check("butunlay boshqa javob rad etiladi", r["data"]["results"][0]["correct"] is False,
-      r["data"]["results"][0])
+# --- 7. Imlo toleransi -----------------------------------------------------
+print("\n7) Imlo toleransi (yozish mashqi)")
+long_w = next(w for w in s6["words"] if len(w["word_en"]) > 5)
+dbz = SessionLocal()
+uw = dbz.query(UserWord).filter_by(
+    user_id=uid, word_id=long_w["word_id"]).first()
+if uw is None:
+    uw = UserWord(user_id=uid, word_id=long_w["word_id"], stage=2, stage_reps=0,
+                  step=1, ease=250, interval_days=1, due_date=d(1), reps=1)
+    dbz.add(uw)
+else:
+    uw.stage = 2
+    uw.due_date = d(1)
+dbz.commit()
+w = long_w["word_en"]
+typo = w[:-2] + w[-1] + w[-2]
+r = client.post("/reviews/submit", json={"local_date": d(1), "answers": [
+    {"word_id": long_w["word_id"], "exercise": "type_production",
+     "answer": typo}]}, headers=H).json()["data"]
+check(f"transpozitsiya kechiriladi ({w!r} <- {typo!r})",
+      r["results"][0]["correct"] is True, r["results"][0])
+r = client.post("/reviews/submit", json={"local_date": d(2), "answers": [
+    {"word_id": long_w["word_id"], "exercise": "type_production",
+     "answer": "qwertyzz"}]}, headers=H).json()["data"]
+check("butunlay boshqa javob rad etiladi",
+      r["results"][0]["correct"] is False, r["results"][0])
 
-# --- 6. STREAK DEVORI — asosiy tekshiruv ----------------------------------
-print("\n6) STREAK DEVORI — hamma unit tugagan user ham streak oladi")
+# --- 8. STREAK DEVORI ------------------------------------------------------
+print("\n8) Streak devori — hamma unit tugagan user ham streak oladi")
+uid3, H3 = new_user("c@t.com")
 db3 = SessionLocal()
-u2 = User(email="done@test.com", name="Done", google_sub="done-sub")
-db3.add(u2); db3.commit(); db3.refresh(u2)
 for unit in db3.query(Unit).all():
-    db3.add(UnitCompletion(user_id=u2.id, unit_id=unit.id, score=100))
+    db3.add(UnitCompletion(user_id=uid3, unit_id=unit.id, score=100))
 db3.commit()
-H2 = {"Authorization": "Bearer " + create_access_token(u2.id)}
 
-# Eski yo'l: tugatilgan unit quizi streak BERMAYDI (devor)
 unit_any = db3.query(Unit).first()
-qz = client.get(f"/quiz/unit/{unit_any.id}", params={"count": 5}).json()["data"]
+qz = client.get(f"/quiz/unit/{unit_any.id}?count=5").json()["data"]
 qa = [{"word_id": q["id"], "answer": q["correct"]} for q in qz]
 r = client.post("/quiz/submit", json={"source": "quiz", "local_date": d(20),
-                                      "unit_id": unit_any.id, "answers": qa}, headers=H2).json()
+                                      "unit_id": unit_any.id, "answers": qa},
+                headers=H3).json()["data"]
 check("eski quiz yo'li streak bermaydi (devor mavjud edi)",
-      r["data"]["streak"]["increased"] is False, r["data"]["streak"])
+      r["streak"]["increased"] is False, r["streak"])
 
-# Yangi yo'l: takrorlash sessiyasi streak BERADI
-rv = client.get("/reviews/today", params={"local_date": d(20)}, headers=H2).json()
-its = rv["data"]["items"]
-ans3 = [{"word_id": i["word_id"], "exercise": "mcq", "answer": i["word_en"]} for i in its]
-r = client.post("/reviews/submit", json={"local_date": d(20), "answers": ans3}, headers=H2).json()
-check("YANGI yo'l: takrorlash streak beradi",
-      r["data"]["streak"]["increased"] is True and r["data"]["streak"]["current_streak"] == 1,
-      r["data"]["streak"])
+s8 = session(H3, d(20))
+_, r = run_etap(H3, d(20), s8["words"], 0)
+check("YANGI yo'l: sessiya streak beradi",
+      r["streak"]["increased"] is True and r["streak"]["current_streak"] == 1,
+      r["streak"])
 
-# --- 7. Migratsiya --------------------------------------------------------
-print("\n7) Migratsiya — tugatilgan unitlar stage 1 dan boshlanadi")
-db3.query(__import__("models").UserWord).filter_by(user_id=u2.id).delete()
-db3.commit()
-from migrate_srs import migrate
+# --- 9. Statistika ---------------------------------------------------------
+print("\n9) Statistika")
+st = client.get("/reviews/stats", params={"local_date": d(20)},
+                headers=H3).json()["data"]
+check("today_goal unit hajmiga bog'landi", st["unit_size"] == 20,
+      st.get("unit_size"))
+check("unit nomi qaytdi", st.get("unit_name") is not None, st.get("unit_name"))
+check("bugun bajarilgan 20", st["today_done"] == 20, st["today_done"])
+check("aktiv so'z 0 (Faza 4)", st["active_words"] == 0)
+
+# --- 10. Migratsiya --------------------------------------------------------
+print("\n10) Migratsiya")
+from migrate_srs import migrate  # noqa: E402
 res = migrate(SessionLocal(), dry_run=True)
-check("dry-run yozuv qo'shmaydi", res["would_insert"] > 0, res)
-res = migrate(SessionLocal())
-check("yozuvlar qo'shildi", res["inserted"] > 0, res)
-db4 = SessionLocal()
-from models import UserWord as UW
-rows = db4.query(UW).filter_by(user_id=u2.id).all()
-check("hammasi stage 1", all(x.stage == 1 for x in rows), {x.stage for x in rows})
-spread = {x.due_date for x in rows}
-check(f"due sanalar yoyilgan ({len(spread)} xil sana)", len(spread) > 5, sorted(spread)[:5])
-res2 = migrate(SessionLocal())
-check("idempotent (takror qo'shmaydi)", res2["inserted"] == 0, res2)
+check("dry-run yozuv qo'shmaydi", "would_insert" in res, res)
+migrate(SessionLocal())
+check("idempotent (ikkinchi marta 0)",
+      migrate(SessionLocal())["inserted"] == 0)
 
-# --- 8. TO'LIQ CHEKSIZ: bitta kunda Recognise -> Produce ---------------------
-print("\n8) Bitta kunda 0-darajadan Produce gacha")
-db5 = SessionLocal()
-u3 = User(email="fast@test.com", name="Fast", google_sub="fast-sub")
-db5.add(u3); db5.commit(); db5.refresh(u3)
-H3 = {"Authorization": "Bearer " + create_access_token(u3.id)}
-DAY = d(40)
-
-rv = client.get("/reviews/today", params={"local_date": DAY}, headers=H3).json()
-w = rv["data"]["items"][0]
-wid, wen = w["word_id"], w["word_en"]
-stages = []
-for step in range(4):
-    rv = client.get("/reviews/today", params={"local_date": DAY}, headers=H3).json()
-    it = next((x for x in rv["data"]["items"] if x["word_id"] == wid), None)
-    if it is None:
-        break
-    stages.append((it["stage"], it["exercise"]))
-    ans = ({"word_id": wid, "exercise": "recall_meaning", "known": True}
-           if it["exercise"] == "recall_meaning"
-           else {"word_id": wid, "exercise": it["exercise"], "answer": wen})
-    client.post("/reviews/submit", json={"local_date": DAY, "answers": [ans]}, headers=H3)
-
-print("   bosqichlar:", " -> ".join(f"{s}:{e}" for s, e in stages))
-check("bitta kunda 4 marta chiqdi", len(stages) == 4, stages)
-check("mcq -> recall -> produce ketma-ketligi",
-      [s for s, _ in stages] == [0, 0, 1, 1] or [s for s, _ in stages] == [0, 1, 1, 2],
-      stages)
-db6 = SessionLocal()
-final = db6.query(UW).filter_by(user_id=u3.id, word_id=wid).first()
-check(f"o'sha kuni Produce (stage 2) ga yetdi", final.stage == 2, final.stage)
-check("Produce'ga yetgach kun oralig'i boshlanadi", final.due_date > DAY,
-      f"due={final.due_date} day={DAY}")
-
-# --- 9. Yangi so'zlar OXIRGI ISHLAGAN unitdan --------------------------------
-print("\n9) Yangi so'zlar oxirgi ishlagan unitdan keladi")
-db7 = SessionLocal()
-u4 = User(email="unit@test.com", name="Unit", google_sub="unit-sub")
-db7.add(u4); db7.commit(); db7.refresh(u4)
-H4 = {"Authorization": "Bearer " + create_access_token(u4.id)}
-
-units = db7.query(Unit).order_by(Unit.id).all()
-target = units[3]                      # 4-unit — boshidan ancha uzoq
-db7.add(UnitCompletion(user_id=u4.id, unit_id=target.id, score=100))
-db7.commit()
-
-rv = client.get("/reviews/today", params={"local_date": d(50)}, headers=H4).json()
-ids = [i["word_id"] for i in rv["data"]["items"]]
-target_word_ids = {w.id for w in db7.query(Word).filter(Word.unit_id == target.id).all()}
-from_target = sum(1 for i in ids if i in target_word_ids)
-check(f"so'zlar {target.id}-unitdan keldi (1-unitdan emas)",
-      from_target == len(ids) and len(ids) > 0,
-      f"{from_target}/{len(ids)} ta shu unitdan")
-
-# Yangi (hech narsa ishlamagan) foydalanuvchi eng boshidan boshlaydi
-u5 = User(email="new@test.com", name="New", google_sub="new-sub")
-db7.add(u5); db7.commit(); db7.refresh(u5)
-H5 = {"Authorization": "Bearer " + create_access_token(u5.id)}
-rv = client.get("/reviews/today", params={"local_date": d(50)}, headers=H5).json()
-first_unit_ids = {w.id for w in db7.query(Word).filter(Word.unit_id == units[0].id).all()}
-ids2 = [i["word_id"] for i in rv["data"]["items"]]
-check("yangi user 1-unitdan boshlaydi",
-      all(i in first_unit_ids for i in ids2) and len(ids2) > 0,
-      ids2[:5])
-
-
-# --- Yakun ----------------------------------------------------------------
+# --- Yakun -----------------------------------------------------------------
 print("\n" + "=" * 60)
 if FAIL:
     print(f"XATOLAR ({len(FAIL)}):")

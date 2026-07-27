@@ -13,7 +13,11 @@ from datetime import date, timedelta
 # --- Sozlanadigan parametrlar (SRS_SPEC.md, 12-bo'lim) ---------------------
 
 INTERVALS = [1, 3, 7, 16, 35, 90]   # kun — `step` shu massivga indeks
-STAGE_UP_THRESHOLD = 2              # darajani oshirish uchun ketma-ket to'g'ri
+# Darajani oshirish uchun kerakli to'g'ri javoblar soni.
+# 1 = bitta ETAP bitta daraja. Sessiya bosqichma-bosqich quriladi (Recognise
+# etapi -> Recall etapi -> Produce etapi) va har etapda so'z bir marta chiqadi,
+# shuning uchun etapni tugatgan so'z keyingi darajaga o'tishi kerak.
+STAGE_UP_THRESHOLD = 1
 # Daraja ko'tarilganda `step` shuncha orqaga tortiladi.
 # SABAB: yangi daraja = YANGI, QIYINROQ mashq turi. Agar interval uzun bo'lib
 # qolsa, so'z 2-darajaga (yozish) chiqadi-yu, keyingi safar 40 kundan keyin
@@ -164,6 +168,7 @@ def next_state(current: dict, correct: bool, local_date: str,
     Qaytadi: yangi qiymatlar dict'i (chaqiruvchi uni modelga yozadi).
     """
     stage = int(current.get("stage") or 0)
+    answered_at = stage  # javob QAYSI darajada berildi (pastdagi qoida uchun)
     stage_reps = int(current.get("stage_reps") or 0)
     step = int(current.get("step") or 0)
     ease = int(current.get("ease") or EASE_START)
@@ -196,11 +201,20 @@ def next_state(current: dict, correct: bool, local_date: str,
         stage = max(stage - 1, 0)
         interval_days = 1
 
-    # So'z hali MAX darajaga yetmagan bo'lsa — O'SHA KUNI qayta chiqadi.
-    # Shu tufayli foydalanuvchi xohlasa bitta o'tirishda so'zni Recognise dan
-    # Produce gacha olib chiqa oladi va hech qanday "ertaga kel" to'sig'i yo'q.
-    # MAX darajaga yetgach normal oraliqlar boshlanadi (uzoq muddatli saqlanish).
-    if SAME_DAY_UNTIL_MAX_STAGE and stage < max_stage:
+    # So'z o'sha kuni qayta chiqadimi.
+    #
+    # MUHIM nozik joy: shart YANGI darajaga emas, javob BERILGAN darajaga
+    # bog'lanadi. Aks holda so'z Recall etapida to'g'ri javobdan keyin darrov
+    # Produce darajasiga "yetadi"-yu, kun oralig'iga ketadi — natijada YOZISH
+    # mashqi hech qachon bajarilmaydi. Daraja "olingan" bo'ladi, lekin o'sha
+    # darajada bir marta ham mashq qilinmaydi.
+    #
+    #   javob 0-darajada berildi -> o'sha kuni (Recall etapiga)
+    #   javob 1-darajada berildi -> o'sha kuni (Produce etapiga)
+    #   javob 2-darajada berildi -> normal oraliq (kun oralig'i boshlanadi)
+    #
+    # Xato javobda esa so'z MAX dan pastga tushadi va o'sha kuni qayta so'raladi.
+    if SAME_DAY_UNTIL_MAX_STAGE and (answered_at < max_stage or stage < max_stage):
         interval_days = 0
 
     return {

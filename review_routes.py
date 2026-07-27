@@ -13,7 +13,7 @@ import random
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.encoders import jsonable_encoder
-from sqlalchemy import and_, func, tuple_
+from sqlalchemy import and_, func, or_, tuple_
 from sqlalchemy.orm import Session
 
 import srs
@@ -36,7 +36,6 @@ DEFAULT_REVIEW_LIMIT = 25   # kuniga nechta takrorlash ko'rsatiladi
 # bo'lishi kerak. DEFAULT_NEW_LIMIT bilan tenglashtirilgan: standart sessiyani
 # oxirigacha bajargan foydalanuvchi streakini oladi.
 GOAL_MIN_ITEMS = 8
-EASY_START_COUNT = 3        # sessiya boshidagi "oson" (takrorlash) elementlar
 
 
 def _ok(message: str, data):
@@ -196,36 +195,90 @@ def _pick_new_words(db: Session, user: User, limit: int, book_id=None) -> list:
     return picked[:limit]
 
 
-def _interleave(due_items: list, new_items: list) -> list:
-    """Takrorlash va yangi so'zlarni aralashtiradi.
+def _session_unit(db: Session, user: User, local_date: str, book_id=None):
+    """Sessiya uchun unitni tanlaydi.
 
-    Sessiya boshida bir necha TAKRORLASH beriladi (oson start — foydalanuvchi
-    darrov "men bilaman" hissini oladi), keyin yangi so'zlar aralashadi.
-    Aralashtirish (interleaving) blok-blok berishdan yaxshiroq eslab qolinadi.
+    Oxirgi ishlagan unitda BUGUN qiladigan ish qolgan bo'lsa — o'sha unit.
+    Ish qolmagan bo'lsa — keyingi unitga o'tamiz.
     """
-    head = due_items[:EASY_START_COUNT]
-    rest = due_items[EASY_START_COUNT:] + new_items
-    random.shuffle(rest)
-    return head + rest
+    current = _current_unit_id(db, user)
+
+    def has_work_today(unit_id: int) -> bool:
+        """Unitda bugun qilinadigan ish bormi.
+
+        Mezon DARAJA emas, MUDDAT: so'z hali ko'rilmagan bo'lsa yoki muddati
+        bugunga (yoki undan oldinga) kelgan bo'lsa — ish bor.
+
+        Avval "hamma so'z MAX darajaga yetdimi" deb tekshirilardi. U noto'g'ri
+        edi: so'z Recall etapi oxirida Produce darajasiga "yetadi", lekin
+        yozish mashqi hali bajarilmagan bo'ladi — unit esa tugagan hisoblanib,
+        Produce etapi umuman o'tkazib yuborilardi.
+        """
+        return db.query(Word.id).outerjoin(
+            UserWord,
+            and_(UserWord.word_id == Word.id, UserWord.user_id == user.id),
+        ).filter(
+            Word.unit_id == unit_id,
+            or_(UserWord.id.is_(None), UserWord.due_date <= local_date),
+        ).first() is not None
+
+    if current is not None and has_work_today(current):
+        return db.query(Unit).filter(Unit.id == current).first()
+
+    # Keyingi unit: birinchi ko'rilmagan so'zi bor unit
+    nxt = _pick_new_words(db, user, 1, book_id)
+    if nxt:
+        return db.query(Unit).filter(Unit.id == nxt[0].unit_id).first()
+
+    # Yangi so'z qolmagan — oxirgi unitda qolib ketamiz (faqat takrorlash bo'ladi)
+    if current is not None:
+        return db.query(Unit).filter(Unit.id == current).first()
+    return db.query(Unit).join(Book, Book.id == Unit.book_id).order_by(Book.id, Unit.id).first()
 
 
-@review_router.get('/today')
-def get_today(
+@review_router.get('/session')
+def get_session(
     local_date: str = Query(..., description="Client mahalliy sanasi YYYY-MM-DD"),
-    new_limit: int = Query(DEFAULT_NEW_LIMIT, ge=0, le=50),
     review_limit: int = Query(DEFAULT_REVIEW_LIMIT, ge=0, le=100),
-    book_id: int = Query(None, description="Ixtiyoriy: faqat shu kitobdan yangi so'z"),
+    book_id: int = Query(None, description="Ixtiyoriy: faqat shu kitobdan"),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Bugungi sessiya navbati.
+    """Bir kunlik sessiya = BITTA UNIT, bosqichma-bosqich.
 
-    `review_limit` — kechikkan qarz to'planishining oldini oladi. 10 kun
-    yo'qolgan foydalanuvchi 250 ta emas, 25 ta ko'radi. Bu SRS ning eng katta
-    nuqsoni va uni shu yerda hal qilamiz.
+    Javob tuzilishi client'ga etaplarni qurish imkonini beradi:
+      - `words`        — unitning BARCHA so'zlari + har birining joriy darajasi
+      - `review_items` — oldingi unitlardan muddati kelgan so'zlar (alohida etap)
+
+    Etaplarni client quradi: har daraja uchun o'sha darajadagi so'zlar QAYTA
+    ARALASHTIRILIB beriladi. Aralashtirish har etapda takrorlanadi — aks holda
+    foydalanuvchi so'zni emas, kartaning pozitsiyasini yodlab oladi.
     """
-    # 1) Muddati kelgan takrorlashlar. `due_date` — ISO satr, shuning uchun
-    #    satrli `<=` solishtirish sana bo'yicha to'g'ri ishlaydi.
+    unit = _session_unit(db, user, local_date, book_id)
+    if unit is None:
+        return _ok("Unit topilmadi", {
+            "unit": None, "words": [], "review_items": [],
+            "max_stage": srs.MAX_STAGE_PHASE1,
+        })
+
+    unit_words = db.query(Word).filter(Word.unit_id == unit.id).order_by(Word.id).all()
+    pool = list(unit_words)
+
+    stage_by_word = {
+        uw.word_id: (uw.stage or 0)
+        for uw in db.query(UserWord)
+        .filter(UserWord.user_id == user.id,
+                UserWord.word_id.in_([w.id for w in unit_words]))
+        .all()
+    } if unit_words else {}
+
+    words = [
+        _build_item(stage_by_word.get(w.id, 0), w, pool)
+        for w in unit_words
+    ]
+
+    # Oldingi unitlardan muddati kelganlar — alohida "Takrorlash" etapi
+    unit_word_ids = {w.id for w in unit_words}
     due_rows = (
         db.query(UserWord, Word)
         .join(Word, Word.id == UserWord.word_id)
@@ -233,40 +286,34 @@ def get_today(
             UserWord.user_id == user.id,
             UserWord.due_date.isnot(None),
             UserWord.due_date <= local_date,
+            ~Word.id.in_(unit_word_ids) if unit_word_ids else True,
         )
         .order_by(UserWord.due_date.asc(), UserWord.stage.asc())
         .limit(review_limit)
         .all()
     )
-
-    # 2) Yangi so'zlar — oxirgi ishlagan unitdan davom etadi
-    new_words = _pick_new_words(db, user, new_limit, book_id)
-
-    # 3) `mcq` uchun distraktor fondi — element so'zi bilan BIR XIL unitdan.
-    #    Barcha kerakli unitlarni BITTA so'rovda olamiz (N+1 bo'lmasin).
-    mcq_words = [w for uw, w in due_rows if uw.stage == 0] + list(new_words)
-    unit_ids = {w.unit_id for w in mcq_words if w.unit_id is not None}
-    pool_by_unit = {}
-    if unit_ids:
-        for w in db.query(Word).filter(Word.unit_id.in_(unit_ids)).all():
-            pool_by_unit.setdefault(w.unit_id, []).append(w)
-
-    due_items = [
-        _build_item(uw.stage or 0, w, pool_by_unit.get(w.unit_id, []))
+    due_unit_ids = {w.unit_id for uw, w in due_rows if w.unit_id is not None}
+    due_pool = {}
+    if due_unit_ids:
+        for w in db.query(Word).filter(Word.unit_id.in_(due_unit_ids)).all():
+            due_pool.setdefault(w.unit_id, []).append(w)
+    review_items = [
+        _build_item(uw.stage or 0, w, due_pool.get(w.unit_id, []))
         for uw, w in due_rows
     ]
-    new_items = [
-        _build_item(0, w, pool_by_unit.get(w.unit_id, []))
-        for w in new_words
-    ]
 
-    items = _interleave(due_items, new_items)
+    book = db.query(Book).filter(Book.id == unit.book_id).first()
 
-    return _ok("Bugungi navbat", {
-        "goal": len(items),
-        "due_count": len(due_items),
-        "new_count": len(new_items),
-        "items": items,
+    return _ok("Sessiya", {
+        "unit": {
+            "id": unit.id,
+            "name": unit.name,
+            "book_id": unit.book_id,
+            "book_name": book.name if book else None,
+        },
+        "words": words,
+        "review_items": review_items,
+        "max_stage": srs.MAX_STAGE_PHASE1,
     })
 
 
@@ -413,10 +460,16 @@ def submit_reviews(
         "increased": False,
     }
     if goal_met:
-        # `close_day` o'zi commit qiladi
         streak = close_day(db, user, body.local_date, "review", score)
-    else:
-        db.commit()
+
+    # MUHIM: commit HAR DOIM shu yerda bajariladi.
+    #
+    # Avval commit `close_day` ga tashlab qo'yilgan edi, u esa kun ALLAQACHON
+    # yopilgan bo'lsa commit qilmaydi (StreakDay yozuvi bor -> darrov qaytadi).
+    # Natijada kun ichidagi IKKINCHI va undan keyingi sessiyalarda SRS holati
+    # jimgina yo'qolardi: javob "to'g'ri, stage 2" deb qaytardi, lekin bazaga
+    # yozilmasdi. Etap modelida (kuniga 3 ta sessiya) bu har kuni sodir bo'lardi.
+    db.commit()
 
     return _ok("Qabul qilindi", {
         "correct": correct_count,
@@ -481,10 +534,31 @@ def get_stats(
     started = sum(by_stage.values())
     total_words = db.query(func.count(Word.id)).scalar() or 0
 
+    # Kunlik maqsad = joriy UNIT so'zlari + muddati kelgan takrorlashlar.
+    # Sessiya endi unit asosida quriladi, shuning uchun maqsad ham shunga
+    # bog'lanadi (avval qat'iy DEFAULT_NEW_LIMIT edi).
+    unit = _session_unit(db, user, local_date)
+    unit_size = (
+        db.query(func.count(Word.id)).filter(Word.unit_id == unit.id).scalar() or 0
+    ) if unit is not None else 0
+    unit_word_ids = (
+        [w.id for w in db.query(Word.id).filter(Word.unit_id == unit.id).all()]
+        if unit is not None else []
+    )
+    due_outside_unit = (
+        db.query(func.count(UserWord.id))
+        .filter(UserWord.user_id == user.id,
+                UserWord.due_date.isnot(None),
+                UserWord.due_date <= local_date,
+                ~UserWord.word_id.in_(unit_word_ids) if unit_word_ids else True)
+        .scalar()
+    ) or 0
+
     return _ok("Statistika", {
         "today_done": today_done,
-        "today_goal": min(due_today + DEFAULT_NEW_LIMIT,
-                          DEFAULT_REVIEW_LIMIT + DEFAULT_NEW_LIMIT),
+        "today_goal": max(1, unit_size + min(due_outside_unit, DEFAULT_REVIEW_LIMIT)),
+        "unit_name": unit.name if unit is not None else None,
+        "unit_size": unit_size,
         "due_today": due_today,
         "due_tomorrow": due_tomorrow,
         "started_words": started,
