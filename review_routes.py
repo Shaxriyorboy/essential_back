@@ -195,35 +195,59 @@ def _pick_new_words(db: Session, user: User, limit: int, book_id=None) -> list:
     return picked[:limit]
 
 
-def _session_unit(db: Session, user: User, local_date: str, book_id=None):
-    """Sessiya uchun unitni tanlaydi.
+def _unit_has_work_today(db: Session, user: User, unit_id: int,
+                         local_date: str) -> bool:
+    """Unitda bugun qilinadigan ish bormi.
 
-    Oxirgi ishlagan unitda BUGUN qiladigan ish qolgan bo'lsa — o'sha unit.
-    Ish qolmagan bo'lsa — keyingi unitga o'tamiz.
+    Mezon DARAJA emas, MUDDAT: so'z hali ko'rilmagan bo'lsa yoki muddati
+    bugunga (yoki undan oldinga) kelgan bo'lsa — ish bor.
+    """
+    return db.query(Word.id).outerjoin(
+        UserWord,
+        and_(UserWord.word_id == Word.id, UserWord.user_id == user.id),
+    ).filter(
+        Word.unit_id == unit_id,
+        or_(UserWord.id.is_(None), UserWord.due_date <= local_date),
+    ).first() is not None
+
+
+def _unit_touched_today(db: Session, user: User, unit_id: int,
+                        local_date: str) -> bool:
+    """Bu unit ustida BUGUN ishlanganmi."""
+    return db.query(UserWord.id).join(
+        Word, Word.id == UserWord.word_id
+    ).filter(
+        UserWord.user_id == user.id,
+        Word.unit_id == unit_id,
+        UserWord.last_review_date == local_date,
+    ).first() is not None
+
+
+def _session_unit(db: Session, user: User, local_date: str, book_id=None):
+    """Sessiya uchun unitni tanlaydi. KUNIGA BITTA UNIT.
+
+    Qoida (mahsulot qarori):
+      - joriy unitda bugungi ish qolgan bo'lsa      -> o'sha unit
+      - joriy unit BUGUN tugatilgan bo'lsa          -> yangi unit YO'Q (ertaga)
+      - joriy unit oldinroq tugatilgan bo'lsa       -> keyingi unit ochiladi
+
+    Nega kuniga bitta: cheksiz modelda foydalanuvchi bir kunda 15 ta unit
+    qilib tashlashi mumkin edi (~300 so'z). Bir hafta o'tib ularning hammasi
+    takrorlashga qaytadi va 300 ta kartani ko'rgan odam ilovani tashlab
+    ketadi. Kunlik cheklov bu portlashning oldini oladi va tushunarli ritm
+    beradi.
+
+    `None` qaytsa — bugungi unit tugatilgan, yangisi ertaga ochiladi.
     """
     current = _current_unit_id(db, user)
 
-    def has_work_today(unit_id: int) -> bool:
-        """Unitda bugun qilinadigan ish bormi.
-
-        Mezon DARAJA emas, MUDDAT: so'z hali ko'rilmagan bo'lsa yoki muddati
-        bugunga (yoki undan oldinga) kelgan bo'lsa — ish bor.
-
-        Avval "hamma so'z MAX darajaga yetdimi" deb tekshirilardi. U noto'g'ri
-        edi: so'z Recall etapi oxirida Produce darajasiga "yetadi", lekin
-        yozish mashqi hali bajarilmagan bo'ladi — unit esa tugagan hisoblanib,
-        Produce etapi umuman o'tkazib yuborilardi.
-        """
-        return db.query(Word.id).outerjoin(
-            UserWord,
-            and_(UserWord.word_id == Word.id, UserWord.user_id == user.id),
-        ).filter(
-            Word.unit_id == unit_id,
-            or_(UserWord.id.is_(None), UserWord.due_date <= local_date),
-        ).first() is not None
-
-    if current is not None and has_work_today(current):
-        return db.query(Unit).filter(Unit.id == current).first()
+    if current is not None:
+        if _unit_has_work_today(db, user, current, local_date):
+            return db.query(Unit).filter(Unit.id == current).first()
+        # Ish qolmagan. Agar shu unit BUGUN tugatilgan bo'lsa — kunlik norma
+        # bajarilgan, yangi unit ertaga.
+        if _unit_touched_today(db, user, current, local_date):
+            return None
 
     # Keyingi unit: birinchi ko'rilmagan so'zi bor unit
     nxt = _pick_new_words(db, user, 1, book_id)
@@ -255,13 +279,16 @@ def get_session(
     foydalanuvchi so'zni emas, kartaning pozitsiyasini yodlab oladi.
     """
     unit = _session_unit(db, user, local_date, book_id)
-    if unit is None:
-        return _ok("Unit topilmadi", {
-            "unit": None, "words": [], "review_items": [],
-            "max_stage": srs.MAX_STAGE_PHASE1,
-        })
 
-    unit_words = db.query(Word).filter(Word.unit_id == unit.id).order_by(Word.id).all()
+    # `unit is None` — bugungi unit tugatilgan, yangisi ERTAGA ochiladi.
+    # Bu holatda ham takrorlash bo'lishi mumkin, shuning uchun javobni to'liq
+    # quramiz: faqat `words` bo'sh va `unit_done_today` bayrog'i qo'yiladi.
+    unit_done_today = unit is None
+
+    unit_words = (
+        db.query(Word).filter(Word.unit_id == unit.id).order_by(Word.id).all()
+        if unit is not None else []
+    )
     pool = list(unit_words)
 
     stage_by_word = {
@@ -302,10 +329,13 @@ def get_session(
         for uw, w in due_rows
     ]
 
-    book = db.query(Book).filter(Book.id == unit.book_id).first()
+    book = (
+        db.query(Book).filter(Book.id == unit.book_id).first()
+        if unit is not None else None
+    )
 
     return _ok("Sessiya", {
-        "unit": {
+        "unit": None if unit is None else {
             "id": unit.id,
             "name": unit.name,
             "book_id": unit.book_id,
@@ -313,6 +343,8 @@ def get_session(
         },
         "words": words,
         "review_items": review_items,
+        # True — bugungi unit tugatilgan, yangisi ertaga ochiladi
+        "unit_done_today": unit_done_today,
         "max_stage": srs.MAX_STAGE_PHASE1,
     })
 
@@ -538,6 +570,7 @@ def get_stats(
     # Sessiya endi unit asosida quriladi, shuning uchun maqsad ham shunga
     # bog'lanadi (avval qat'iy DEFAULT_NEW_LIMIT edi).
     unit = _session_unit(db, user, local_date)
+    unit_done_today = unit is None
     unit_size = (
         db.query(func.count(Word.id)).filter(Word.unit_id == unit.id).scalar() or 0
     ) if unit is not None else 0
@@ -558,6 +591,7 @@ def get_stats(
         "today_done": today_done,
         "today_goal": max(1, unit_size + min(due_outside_unit, DEFAULT_REVIEW_LIMIT)),
         "unit_name": unit.name if unit is not None else None,
+        "unit_done_today": unit_done_today,
         "unit_size": unit_size,
         "due_today": due_today,
         "due_tomorrow": due_tomorrow,

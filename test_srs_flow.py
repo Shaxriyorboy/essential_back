@@ -148,11 +148,16 @@ check("Produce'ga yetgach kun oralig'i boshlandi",
       all(x.due_date > d() for x in rows),
       sorted({x.due_date for x in rows})[:3])
 
-# --- 4. Unit tugagach keyingi unitga o'tadi ---------------------------------
-print("\n4) Unit tugagach keyingi unit beriladi")
-s4 = session(H, d())
-check("yangi unit tanlandi", s4["unit"]["id"] != s["unit"]["id"],
-      f'{s["unit"]["id"]} -> {s4["unit"]["id"]}')
+# --- 4. KUNIGA BITTA UNIT ---------------------------------------------------
+print("\n4) Kuniga bitta unit — yangisi ertaga ochiladi")
+s4today = session(H, d())
+check("BUGUN yangi unit berilmaydi", s4today["unit"] is None, s4today.get("unit"))
+check("unit_done_today bayrog'i", s4today["unit_done_today"] is True, s4today)
+
+s4 = session(H, d(1))
+check("ERTAGA yangi unit ochiladi", s4["unit"] is not None
+      and s4["unit"]["id"] != s["unit"]["id"],
+      s4.get("unit"))
 check("yangi unitda 20 ta so'z", len(s4["words"]) == 20, len(s4["words"]))
 check("hammasi 0-darajadan boshlanadi",
       all(w["stage"] == 0 for w in s4["words"]))
