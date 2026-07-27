@@ -44,14 +44,28 @@ TYPO_TOLERANCE_MIN_LEN = 5          # shu uzunlikdan katta so'zlarda 1 xato kech
 # hal qiladi. 3 va 4-darajalar Faza 3/4 da yoqiladi.
 EXERCISE_BY_STAGE = {
     0: "mcq",              # 4 variantli test (UZ -> EN)
-    1: "type_hinted",      # yozish, birinchi harf berilgan (UZ -> EN)
+    1: "listen",           # eshitib yozish (audio -> EN)
     2: "type_production",  # yozish, yordamsiz (UZ -> EN)  <- aktiv chegarasi
     3: "gap_fill",         # Faza 3
     4: "speaking",         # Faza 4
 }
 
-# Uchala bosqich ham BITTA yo'nalishda (UZ -> EN) va har bosqichda yordam
-# kamayadi: variantlar -> birinchi harf -> hech narsa.
+# Uchala bosqich UCHTA BOSHQA ko'nikmani o'lchaydi:
+#   Recognise  ko'r va tanla       yozma tanish
+#   Listen     eshit va yoz        TOVUSH shakli — suhbat uchun zarur
+#   Produce    ma'nodan yoz        ishlab chiqarish
+#
+# Avval 1-bosqich `recall_meaning` (EN->UZ karta + "Bildim") edi, keyin
+# ipuchali yozish sinaldi. Ikkalasi ham Produce bilan BIR XIL operatsiya
+# bo'lib chiqdi (cued recall) — faqat yordam darajasi farq qilardi, shuning
+# uchun foydalanuvchi ularni ajrata olmasdi.
+#
+# Eshitish esa butunlay boshqa kanal: ko'pchilik so'zni yozma biladi, lekin
+# eshitganda tanimaydi. Ilovaning maqsadi gapirish bo'lgani uchun so'zning
+# tovush shakli mustahkam bo'lishi shart.
+#
+# Qurilmada ingliz ovozi bo'lmasa client yozma rejimga tushadi (progressiya
+# uzilmasin) — javob baribir `word_en` bilan solishtiriladi.
 #
 # Avval 1-bosqich `recall_meaning` edi (EN -> UZ karta + "Bildim/Bilmadim").
 # Ikki nuqsoni bor edi: (1) yo'nalish sakrardi, shuning uchun bosqichlar
@@ -61,6 +75,8 @@ EXERCISE_BY_STAGE = {
 
 # Eski javoblar (offline navbatda qolgan) baholanishi uchun qo'llab-quvvatlanadi
 LEGACY_SELF_RATED = "recall_meaning"
+
+# `letter_bank` javobi ham `word_en` bilan solishtiriladi — alohida mantiq yo'q.
 
 
 def exercise_for_stage(stage: int) -> str:

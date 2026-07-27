@@ -1,7 +1,7 @@
 """SRS oqimini uchdan-uchgacha tekshirish (alohida sqlite bazasida).
 
 Model: bir kunlik sessiya = BITTA UNIT, bosqichma-bosqich (etap).
-    Recognise (mcq) -> Recall (ipuchali yozish) -> Produce (yozish)
+    Recognise (mcq) -> Listen (eshitib yozish) -> Produce (yozish)
 Har etapda unitning BARCHA so'zlari qatnashadi.
 
 Ishga tushirish:  ./venv/bin/python test_srs_flow.py
@@ -121,8 +121,8 @@ check("20/20 to'g'ri", r["correct"] == 20, r["correct"])
 check("hammasi darajani ko'tardi", len(r["stage_ups"]) == 20, len(r["stage_ups"]))
 
 s2 = session(H, d())
-check("1-bosqich mashqi ipuchali yozish",
-      srs.exercise_for_stage(1) == "type_hinted", srs.exercise_for_stage(1))
+check("1-bosqich mashqi eshitib yozish",
+      srs.exercise_for_stage(1) == "listen", srs.exercise_for_stage(1))
 check("eski self-rated tur baholanadi (offline navbat uchun)",
       srs.LEGACY_SELF_RATED == "recall_meaning")
 check("endi hammasi 1-darajada (Recall)",
