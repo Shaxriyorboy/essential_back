@@ -223,6 +223,49 @@ def _unit_touched_today(db: Session, user: User, unit_id: int,
     ).first() is not None
 
 
+def _unit_stage_progress(db: Session, user: User, unit_id, local_date: str):
+    """Unitning nechta BOSQICHI tugatilgan: `(bajarilgan, jami)`.
+
+    Jami bosqichlar = MAX_STAGE + 1 (Recognise, Recall, Produce).
+
+    Bosqich `s` tugagan hisoblanadi:
+      - s < MAX  -> unitning HAMMA so'zi `s` dan yuqori darajada
+      - s == MAX -> hamma so'z MAX darajada VA muddati ertaga surilgan
+                    (ya'ni yozish mashqi ham bajarilgan)
+
+    Oxirgi shart muhim: so'z Recall etapi oxirida MAX darajaga "yetadi", lekin
+    Produce mashqi hali bajarilmagan bo'ladi. Faqat `due_date` surilgani
+    o'sha etap haqiqatan o'tganini bildiradi.
+    """
+    total = srs.MAX_STAGE_PHASE1 + 1
+    if unit_id is None:
+        return 0, total
+
+    rows = (
+        db.query(Word.id, UserWord.stage, UserWord.due_date)
+        .outerjoin(
+            UserWord,
+            and_(UserWord.word_id == Word.id, UserWord.user_id == user.id),
+        )
+        .filter(Word.unit_id == unit_id)
+        .all()
+    )
+    if not rows:
+        return 0, total
+
+    stages = [(r[1] or 0) for r in rows]
+    dues = [r[2] for r in rows]
+
+    done = 0
+    for s in range(srs.MAX_STAGE_PHASE1):
+        if all(st > s for st in stages):
+            done += 1
+    if (all(st >= srs.MAX_STAGE_PHASE1 for st in stages)
+            and all(dd is not None and dd > local_date for dd in dues)):
+        done += 1
+    return done, total
+
+
 def _session_unit(db: Session, user: User, local_date: str, book_id=None):
     """Sessiya uchun unitni tanlaydi. KUNIGA BITTA UNIT.
 
@@ -587,9 +630,20 @@ def get_stats(
         .scalar()
     ) or 0
 
+    stages_done, stages_total = _unit_stage_progress(
+        db, user, unit.id if unit is not None else None, local_date)
+    if unit_done_today:
+        stages_done = stages_total
+
     return _ok("Statistika", {
-        "today_done": today_done,
-        "today_goal": max(1, unit_size + min(due_outside_unit, DEFAULT_REVIEW_LIMIT)),
+        # Kunlik maqsad endi BOSQICH bilan o'lchanadi, so'z soni bilan emas.
+        # Sabab: `today_done` turli so'zlarni sanaydi, unit esa 3 ta bosqichdan
+        # iborat. Birinchi etapdan keyin 20 ta so'z "ishlangan" bo'lardi va
+        # halqa to'lib "maqsad bajarildi" deb turardi — holbuki oldinda yana
+        # ikkita etap bor edi.
+        "today_done": stages_done,
+        "today_goal": stages_total,
+        "words_done_today": today_done,
         "unit_name": unit.name if unit is not None else None,
         "unit_done_today": unit_done_today,
         "unit_size": unit_size,

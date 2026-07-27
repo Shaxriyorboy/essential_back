@@ -250,7 +250,11 @@ st = client.get("/reviews/stats", params={"local_date": d(20)},
 check("today_goal unit hajmiga bog'landi", st["unit_size"] == 20,
       st.get("unit_size"))
 check("unit nomi qaytdi", st.get("unit_name") is not None, st.get("unit_name"))
-check("bugun bajarilgan 20", st["today_done"] == 20, st["today_done"])
+check("bosqich hisobi: 1/3 (faqat Recognise)",
+      st["today_done"] == 1 and st["today_goal"] == 3,
+      f'{st["today_done"]}/{st["today_goal"]}')
+check("so'z hisobi alohida maydonda", st["words_done_today"] == 20,
+      st.get("words_done_today"))
 check("aktiv so'z 0 (Faza 4)", st["active_words"] == 0)
 
 # --- 10. Migratsiya --------------------------------------------------------
