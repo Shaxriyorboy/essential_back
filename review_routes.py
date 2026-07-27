@@ -86,6 +86,11 @@ def _build_item(stage: int, word: Word, pool: list) -> dict:
             item["exercise"] = "type_production"
         else:
             item["gap_sentence"] = gap["sentence"]
+            # Gapdan olib tashlangan AYNAN shakl (`hunted`). Client darhol
+            # feedback ko'rsatishi uchun kerak — u `word_en` (`hunt`) bilan
+            # solishtirsa, to'g'ri javobni xato deb ko'rsatib qo'yardi va
+            # server bilan zid tushardi.
+            item["gap_answer"] = gap["answer"]
     return item
 
 
