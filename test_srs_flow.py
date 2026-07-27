@@ -1,7 +1,7 @@
 """SRS oqimini uchdan-uchgacha tekshirish (alohida sqlite bazasida).
 
 Model: bir kunlik sessiya = BITTA UNIT, bosqichma-bosqich (etap).
-    Recognise -> Listen -> Produce -> In context (gap-fill)
+    Recognise -> Listen -> Produce -> In context -> Fluent (eshit va takrorla)
 Har etapda unitning BARCHA so'zlari qatnashadi.
 
 Ishga tushirish:  ./venv/bin/python test_srs_flow.py
@@ -117,7 +117,7 @@ check(f"0-darajadayoq gap_sentence keldi ({len(gaps0)}/20)", len(gaps0) >= 18,
 check("gap_answer ham keldi",
       all(w.get("gap_answer") for w in s["words"] if w.get("gap_sentence")))
 check("takrorlash bo'sh (birinchi kun)", s["review_items"] == [])
-check("max_stage = 3", s["max_stage"] == 3)
+check("max_stage = 4", s["max_stage"] == 4)
 
 # --- 2. Etap tugagach hamma so'z bir daraja ko'tariladi ---------------------
 print("\n2) Recognise etapi -> hamma so'z Recall darajasiga")
@@ -152,14 +152,22 @@ gaps = [w for w in s3b["words"] if w.get("gap_sentence")]
 check(f"gap_sentence tuzildi ({len(gaps)}/20)", len(gaps) >= 18, len(gaps))
 check("katak gapda bor", all("_____" in w["gap_sentence"] for w in gaps))
 
-items, r = run_etap(H, d(), s3b["words"], 3)
-check("In context etapi bajarildi", r["total"] == 20, r["total"])
+run_etap(H, d(), s3b["words"], 3)
+s3c = session(H, d())
+check("hammasi 4-darajada (Fluent)",
+      all(w["stage"] == 4 for w in s3c["words"]),
+      sorted({w["stage"] for w in s3c["words"]}))
+check("4-bosqich mashqi: eshit va takrorla",
+      srs.exercise_for_stage(4) == "speak", srs.exercise_for_stage(4))
+
+items, r = run_etap(H, d(), s3c["words"], 4)
+check("Fluent etapi bajarildi", r["total"] == 20, r["total"])
 check("kunlik maqsad bajarildi", r["goal_met"] is True, r)
 check("streak 1 ga oshdi", r["streak"]["current_streak"] == 1, r["streak"])
 
 dbx = SessionLocal()
 rows = dbx.query(UserWord).filter_by(user_id=uid).all()
-check("hamma so'z MAX darajada", all(x.stage == 3 for x in rows),
+check("hamma so'z MAX darajada", all(x.stage == 4 for x in rows),
       sorted({x.stage for x in rows}))
 check("Produce'ga yetgach kun oralig'i boshlandi",
       all(x.due_date > d() for x in rows),
@@ -217,11 +225,11 @@ dbz = SessionLocal()
 uw = dbz.query(UserWord).filter_by(
     user_id=uid, word_id=long_w["word_id"]).first()
 if uw is None:
-    uw = UserWord(user_id=uid, word_id=long_w["word_id"], stage=3, stage_reps=0,
+    uw = UserWord(user_id=uid, word_id=long_w["word_id"], stage=4, stage_reps=0,
                   step=1, ease=250, interval_days=1, due_date=d(1), reps=1)
     dbz.add(uw)
 else:
-    uw.stage = 3
+    uw.stage = 4
     uw.due_date = d(1)
 dbz.commit()
 w = long_w["word_en"]
@@ -267,8 +275,8 @@ st = client.get("/reviews/stats", params={"local_date": d(20)},
 check("today_goal unit hajmiga bog'landi", st["unit_size"] == 20,
       st.get("unit_size"))
 check("unit nomi qaytdi", st.get("unit_name") is not None, st.get("unit_name"))
-check("bosqich hisobi: 1/4 (faqat Recognise)",
-      st["today_done"] == 1 and st["today_goal"] == 4,
+check("bosqich hisobi: 1/5 (faqat Recognise)",
+      st["today_done"] == 1 and st["today_goal"] == 5,
       f'{st["today_done"]}/{st["today_goal"]}')
 check("so'z hisobi alohida maydonda", st["words_done_today"] == 20,
       st.get("words_done_today"))
@@ -276,7 +284,7 @@ check("aktiv so'z 0 (hali suhbat bo'lmagan)", st["active_words"] == 0)
 
 # --- 9b. FLUENT: suhbatda erkin ishlatish -----------------------------------
 print("\n9b) Fluent — suhbatda erkin ishlatilgan so'z 4-darajaga chiqadi")
-from speaking_routes import _record_active_uses, FLUENT_USES_REQUIRED
+from speaking_routes import _record_active_uses
 dbf = SessionLocal()
 fl_words = dbf.query(Word).filter(Word.id.in_(
     [x.word_id for x in dbf.query(UserWord).filter_by(user_id=uid).limit(3).all()]
@@ -291,30 +299,23 @@ dbf.commit()
 
 names = [w.word_en for w in fl_words]
 p1 = _record_active_uses(SessionLocal(), uid, names, fl_words)
-check(f"1-marta ishlatilgach hali Fluent emas (kerak: {FLUENT_USES_REQUIRED})",
-      p1 == [], p1)
-p2 = _record_active_uses(SessionLocal(), uid, names, fl_words)
-check("2-martadan keyin Fluent'ga chiqdi", len(p2) == len(fl_words), p2)
+check("suhbat hisobi yozildi", len(p1) == len(fl_words), p1)
 
 dbg = SessionLocal()
-check("daraja 4 ga ko'tarildi",
+check("DARAJA o'zgarmadi (Fluent etap orqali olinadi)",
       all((dbg.query(UserWord).filter_by(user_id=uid, word_id=w.id)
-           .first().stage) == 4 for w in fl_words))
+           .first().stage) == 3 for w in fl_words))
+check("active_uses oshdi",
+      all((dbg.query(UserWord).filter_by(user_id=uid, word_id=w.id)
+           .first().active_uses) == 1 for w in fl_words))
 
-st2 = client.get("/reviews/stats", params={"local_date": d(20)},
-                 headers=H).json()["data"]
-check(f"active_words = {len(fl_words)}", st2["active_words"] == len(fl_words),
-      st2["active_words"])
-
-# SRS'ga kirmagan so'z Fluent bo'lmaydi
+# SRS'ga kirmagan so'z hisobga olinmaydi
 unseen = dbg.query(Word).filter(~Word.id.in_(
     [x.word_id for x in dbg.query(UserWord.word_id).filter_by(user_id=uid).all()]
 )).first()
 if unseen is not None:
     r1 = _record_active_uses(SessionLocal(), uid, [unseen.word_en], [unseen])
-    r2 = _record_active_uses(SessionLocal(), uid, [unseen.word_en], [unseen])
-    check("yozma bosqichlardan o'tmagan so'z Fluent bo'lmaydi",
-          r1 == [] and r2 == [], (r1, r2))
+    check("SRS'ga kirmagan so'z hisobga olinmaydi", r1 == [], r1)
 
 # --- 10. Migratsiya --------------------------------------------------------
 print("\n10) Migratsiya")

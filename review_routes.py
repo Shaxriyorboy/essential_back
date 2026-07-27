@@ -427,6 +427,23 @@ def _grade(answer, word: Word) -> bool:
     if answer.exercise == srs.LEGACY_SELF_RATED:
         return bool(answer.known)
 
+    if answer.exercise == "speak":
+        # Ovoz tanish (STT) natijasi kelади — u ko'pincha bir necha so'zli
+        # matn qaytaradi ("a afraid", "afraid?"). Shuning uchun matn ichidan
+        # so'zni QIDIRAMIZ, aynan tenglikni talab qilmaymiz.
+        #
+        # MUHIM: STT talaffuzni BAHOLAMAYDI — u til modeli bilan "nima
+        # demoqchi edi" ni topadi. Shuning uchun bu tekshiruv ataylab
+        # kechirimli: maqsad odamni ovoz chiqarib aytishga majburlash,
+        # talaffuzga ball qo'yish emas.
+        said = srs.normalize(answer.answer)
+        target = srs.normalize(word.word_en)
+        if not target:
+            return False
+        if target in said.split() or said == target:
+            return True
+        return srs.is_answer_correct(said, target)
+
     if answer.exercise == "gap_fill":
         # Gapdagi shakl ham (`hunted`), asosiy shakl ham (`hunt`) qabul
         # qilinadi — grammatikani bilmagani uchun jazolamaymiz.

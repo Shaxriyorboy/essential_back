@@ -37,10 +37,8 @@ STAGE_UP_STEP_BACK = 2
 # MAX darajaga yetgach normal SRS oraliqlari ishlaydi.
 SAME_DAY_UNTIL_MAX_STAGE = True
 EASE_START, EASE_MIN, EASE_MAX = 250, 130, 300
-# Eng yuqori MAJBURIY daraja. 3 = In context (gap-fill).
-# 4-daraja (Fluent) bu yerga kirmaydi: u suhbatdan to'planadi, etap emas —
-# suhbatni 20 ta so'zning hammasini qamrashga majburlab bo'lmaydi.
-MAX_STAGE_PHASE1 = 3
+# Eng yuqori MAJBURIY daraja. 4 = Fluent (eshit va takrorla).
+MAX_STAGE_PHASE1 = 4
 TYPO_TOLERANCE_MIN_LEN = 5          # shu uzunlikdan katta so'zlarda 1 xato kechiriladi
 
 # Daraja -> mashq turi. Client shu satrga qarab qaysi widget'ni ko'rsatishini
@@ -50,7 +48,7 @@ EXERCISE_BY_STAGE = {
     1: "listen",           # eshitib yozish (audio -> EN)
     2: "type_production",  # yozish, yordamsiz (UZ -> EN)  <- aktiv chegarasi
     3: "gap_fill",         # misol gapdagi katakni to'ldirish
-    4: "speaking",         # suhbatda erkin ishlatish (etap emas)
+    4: "speak",            # eshit va ovoz chiqarib takrorla
 }
 
 # Uchala bosqich UCHTA BOSHQA ko'nikmani o'lchaydi:
@@ -58,6 +56,13 @@ EXERCISE_BY_STAGE = {
 #   Listen      eshit va yoz        TOVUSH shakli — suhbat uchun zarur
 #   Produce     ma'nodan yoz        ishlab chiqarish
 #   In context  gapdagi katak       QO'LLASH — grammatika/kollokatsiya
+#   Fluent      eshit va takrorla   TALAFFUZ — og'zaki shakl
+#
+# ESLATMA (mahsulot qarori): 4-daraja avval "suhbatda erkin ishlatish" edi.
+# Endi u "eshit va takrorla". Farqi muhim: takrorlash ISHORALI ishlab
+# chiqarish (so'z aytib beriladi), suhbatda ishlatish esa erkin eslash.
+# Ya'ni `active_words` metrikasi endi "erkin ishlata oladi" emas, "to'g'ri
+# talaffuz qiladi" degani.
 #
 # Avval 1-bosqich `recall_meaning` (EN->UZ karta + "Bildim") edi, keyin
 # ipuchali yozish sinaldi. Ikkalasi ham Produce bilan BIR XIL operatsiya

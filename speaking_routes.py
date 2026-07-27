@@ -371,14 +371,10 @@ def _bump_usage(db: Session, user_id: int, day: str, elapsed: int,
 
 # --- Fluent (4-daraja) ------------------------------------------------------
 
-# So'z Fluent'ga chiqishi uchun suhbatda shuncha marta SO'RALMASDAN ishlatilishi
-# kerak. 1 marta tasodif bo'lishi mumkin (AI so'zni o'zi aytgan bo'lsa,
-# foydalanuvchi takrorlab qo'yishi mumkin), 2 marta esa allaqachon ishonchli.
-FLUENT_USES_REQUIRED = 2
-
-# Fluent'ga chiqish uchun so'z kamida shu darajada bo'lishi kerak — ya'ni
-# barcha yozma bosqichlardan o'tgan bo'lsin.
-FLUENT_MIN_STAGE = 3
+# ESLATMA: 4-daraja (Fluent) endi "eshit va takrorla" ETAPI orqali olinadi,
+# suhbat orqali emas. Bu yerdagi hisob DARAJANI O'ZGARTIRMAYDI — u faqat
+# "so'z suhbatda necha marta erkin ishlatilgan" statistikasini yuritadi.
+# Kelajakda alohida metrika sifatida ishlatish mumkin.
 
 
 def _record_active_uses(db: Session, user_id: int, used_words, all_words) -> list:
@@ -386,10 +382,11 @@ def _record_active_uses(db: Session, user_id: int, used_words, all_words) -> lis
 
     `used_words` — Gemini qaytargan `target_words_used_by_user` (matn).
     Ular so'z ID'lariga moslanadi va `UserWord.active_uses` oshiriladi.
-    Yetarli marta ishlatilgan va yozma bosqichlardan o'tgan so'z 4-darajaga
-    (Fluent) ko'tariladi.
 
-    Qaytadi: Fluent'ga endigina chiqqan so'z ID'lari.
+    DARAJAGA TEGMAYDI — 4-daraja "eshit va takrorla" etapi orqali olinadi.
+    Bu yerda faqat statistika yig'iladi.
+
+    Qaytadi: hisobi oshgan so'z ID'lari.
     """
     if not used_words:
         return []
@@ -407,21 +404,16 @@ def _record_active_uses(db: Session, user_id: int, used_words, all_words) -> lis
         ).all()
     }
 
-    promoted = []
+    counted = []
     for word in matched:
         uw = rows.get(word.id)
-        # Hali SRS'ga kirmagan so'zni Fluent qilib bo'lmaydi — avval yozma
-        # bosqichlardan o'tsin.
+        # Hali SRS'ga kirmagan so'z hisobga olinmaydi
         if uw is None:
             continue
         uw.active_uses = (uw.active_uses or 0) + 1
-        if (uw.active_uses >= FLUENT_USES_REQUIRED
-                and (uw.stage or 0) >= FLUENT_MIN_STAGE
-                and (uw.stage or 0) < 4):
-            uw.stage = 4
-            promoted.append(word.id)
+        counted.append(word.id)
     db.commit()
-    return promoted
+    return counted
 
 
 @speaking_router.post('/chat')
@@ -486,17 +478,16 @@ def speaking_chat(
     _persist_turn(db, user.id, key, new_user_text,
                   result.get("reply", ""), result.get("corrections", []))
 
-    # 5.2) FLUENT: suhbatda erkin ishlatilgan so'zlarni qayd etamiz.
-    #      Bu ilovaning bosh metrikasi — "shuncha so'zni erkin ishlata olasan".
+    # 5.2) Suhbatda erkin ishlatilgan so'zlarni qayd etamiz (statistika).
     used_by_user = result.get("target_words_used_by_user", []) or []
-    newly_fluent = _record_active_uses(db, user.id, used_by_user, words)
+    used_ids = _record_active_uses(db, user.id, used_by_user, words)
 
     # 6) Javob (Gemini natijasi + tarif/vaqt meta)
     data = {
         "reply": result.get("reply", ""),
         "corrections": result.get("corrections", []),
         "target_words_used_by_user": used_by_user,
-        "newly_fluent": newly_fluent,
+        "conversation_used_ids": used_ids,
         "target_words_introduced": result.get("target_words_introduced", []),
         "level": level,
         "target_word_count": len(words[:MAX_TARGET_WORDS]),
