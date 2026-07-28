@@ -211,6 +211,45 @@ check("ish qolmasa ham hisob 5/5 BO'LMAYDI",
 check("unit_done_today bayrog'i baribir to'g'ri",
       stl["unit_done_today"] is True, stl.get("unit_done_today"))
 
+# --- 3e. XATO QILIB QAYTA TO'G'RILAGAN SO'Z ham darajani ko'taradi ---------
+print("\n3e) Xato qilib keyin to'g'rilagan so'z ham ko'tarilishi kerak")
+uidr, Hr = new_user("retry@t.com")
+DAYR = d(80)
+sr = session(Hr, DAYR)
+words_r = sr["words"]
+
+# Etapni xuddi client kabi o'ynaymiz: 6 tasiga avval XATO, keyin TO'G'RI
+wrong_ids = [w["word_id"] for w in words_r[:6]]
+ans = []
+for w in words_r:
+    if w["word_id"] in wrong_ids:
+        ans.append({"word_id": w["word_id"], "exercise": "mcq",
+                    "answer": "zzzqqq"})           # xato
+    else:
+        ans.append({"word_id": w["word_id"], "exercise": "mcq",
+                    "answer": w["word_en"]})
+# xato qilinganlar navbat oxirida QAYTA chiqadi va to'g'ri javob beriladi
+for w in words_r:
+    if w["word_id"] in wrong_ids:
+        ans.append({"word_id": w["word_id"], "exercise": "mcq",
+                    "answer": w["word_en"]})
+
+r = client.post("/reviews/submit",
+                json={"local_date": DAYR, "answers": ans},
+                headers=Hr).json()["data"]
+check("hamma 20 ta so'z darajani ko'tardi",
+      len(r["stage_ups"]) == 20, len(r["stage_ups"]))
+
+s2r = session(Hr, DAYR)
+stages_r = sorted({w["stage"] for w in s2r["words"]})
+check("keyingi sessiyada hammasi 1-darajada (hech biri qolib ketmadi)",
+      stages_r == [1], stages_r)
+
+dbr = SessionLocal()
+lapsed = dbr.query(UserWord).filter(
+    UserWord.user_id == uidr, UserWord.lapses > 0).count()
+check("xatolar `lapses` da qayd etildi", lapsed == 6, lapsed)
+
 # --- 4. KUNIGA BITTA UNIT ---------------------------------------------------
 print("\n4) Kuniga bitta unit — yangisi ertaga ochiladi")
 s4today = session(H, d())

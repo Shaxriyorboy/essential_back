@@ -494,51 +494,76 @@ def submit_reviews(
     stage_ups = []
     correct_count = 0
 
+    # So'z bo'yicha GURUHLAYMIZ (tartibni saqlab).
+    #
+    # MUHIM: bitta etapda so'z bir necha marta chiqishi mumkin — xato javob
+    # berilgan so'z navbat oxiriga qaytariladi. Avval har javob alohida qayta
+    # ishlanardi va natija BUZILARDI:
+    #     xato    -> daraja bir pog'ona pastga
+    #     to'g'ri -> bir pog'ona yuqoriga
+    # ya'ni so'z o'sha darajada qolardi va etap tugagan bo'lsa ham
+    # ko'tarilmasdi. Foydalanuvchi qayta kirganda o'sha so'zlar oldingi
+    # bosqichda qaytardi ("3 ta kam, 6 ta kam" muammosi).
+    #
+    # Etap modelida xato JAZO EMAS — u "qayta urinasan" degani. Shuning uchun
+    # darajani OXIRGI javob belgilaydi, xatolar esa faqat `lapses` va `ease`
+    # ga ta'sir qiladi.
+    grouped = {}
     for a in answers:
-        word = words.get(a.word_id)
-        if word is None:
-            continue  # o'chirilgan so'z — jimgina o'tkazamiz
+        if a.word_id in words:
+            grouped.setdefault(a.word_id, []).append(a)
 
-        uw = existing.get(a.word_id)
+    for word_id, group in grouped.items():
+        word = words[word_id]
+
+        uw = existing.get(word_id)
         if uw is None:
             # Birinchi marta ko'rilgan so'z — yozuv shu yerda tug'iladi
             init = srs.initial_state(body.local_date)
-            uw = UserWord(user_id=user.id, word_id=a.word_id, **init)
+            uw = UserWord(user_id=user.id, word_id=word_id, **init)
             db.add(uw)
-            existing[a.word_id] = uw
+            existing[word_id] = uw
 
         before_stage = uw.stage or 0
-        is_correct = _grade(a, word)
-        if is_correct:
-            correct_count += 1
+        graded = [(a, _grade(a, word)) for a in group]
+        wrong_count = sum(1 for _, ok in graded if not ok)
+        correct_count += sum(1 for _, ok in graded if ok)
+        last_correct = graded[-1][1]
 
         state = srs.next_state(
             {
                 "stage": uw.stage, "stage_reps": uw.stage_reps, "step": uw.step,
                 "ease": uw.ease, "reps": uw.reps, "lapses": uw.lapses,
             },
-            is_correct,
+            last_correct,
             body.local_date,
         )
+        # Qolgan urinishlarni ham hisobga olamiz. `next_state` oxirgi javobni
+        # allaqachon sanagan, shuning uchun undan ortig'ini qo'shamiz.
+        state["reps"] += len(group) - 1
+        state["lapses"] += wrong_count - (0 if last_correct else 1)
+
         for key, value in state.items():
             setattr(uw, key, value)
         uw.last_review_date = body.local_date
 
         if state["stage"] > before_stage:
-            stage_ups.append(a.word_id)
+            stage_ups.append(word_id)
 
         result = {
-            "word_id": a.word_id,
-            "correct": is_correct,
+            "word_id": word_id,
+            "correct": last_correct,
+            "attempts": len(group),
             "stage": state["stage"],
             "next_due": state["due_date"],
         }
-        if not is_correct:
+        if not last_correct:
             # To'g'ri javobni qaytaramiz — foydalanuvchi o'rgansin
             result["expected"] = word.word_en
         results.append(result)
 
-    total = len(results)
+    # `total` — JAVOBLAR soni (urinishlar bilan), `results` esa so'z bo'yicha
+    total = sum(r["attempts"] for r in results)
     score = round(correct_count / total * 100) if total else 0
 
     # Yangi `due_date` qiymatlari quyidagi so'rovga ko'rinishi uchun flush
