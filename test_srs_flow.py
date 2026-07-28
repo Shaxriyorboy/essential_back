@@ -403,6 +403,54 @@ migrate(SessionLocal())
 check("idempotent (ikkinchi marta 0)",
       migrate(SessionLocal())["inserted"] == 0)
 
+# --- 11. HISOB O'CHIRISH ---------------------------------------------------
+print("\n11) Hisob o'chirish")
+from auth_routes import USER_OWNED_MODELS  # noqa: E402
+import models as _models  # noqa: E402
+
+# 11a) Foydalanuvchiga bog'liq HAMMA jadval ro'yxatda bormi.
+# Bu tekshiruv muhim: yangi jadval qo'shilib ro'yxatga kiritilmasa,
+# Postgres foydalanuvchini o'chirishga ruxsat bermaydi (FK cheklovi) va
+# hisob o'chirish 500 xato bilan tushadi — bu App Store talabi ham.
+linked = []
+for name in dir(_models):
+    obj = getattr(_models, name)
+    if not isinstance(obj, type) or not hasattr(obj, "__tablename__"):
+        continue
+    col = getattr(obj, "user_id", None)
+    if col is None or obj.__name__ == "User":
+        continue
+    try:
+        fks = list(obj.__table__.c.user_id.foreign_keys)
+    except Exception:
+        continue
+    if any(fk.target_fullname == "users.id" for fk in fks):
+        linked.append(obj)
+
+covered = set(USER_OWNED_MODELS) | {_models.RefreshToken}  # token alohida o'chadi
+missing = [m.__name__ for m in linked if m not in covered]
+check(f"barcha bog'liq jadval qamrab olingan ({len(linked)} ta)",
+      not missing, f"ro'yxatda YO'Q: {missing}")
+
+# 11b) Haqiqiy o'chirish ishlaydimi
+uidd, Hd = new_user("delete@t.com")
+sd_ = session(Hd, d(90))
+run_etap(Hd, d(90), sd_["words"], 0)     # so'z yozuvlari paydo bo'lsin
+dbd = SessionLocal()
+check("o'chirishdan oldin user_words bor",
+      dbd.query(UserWord).filter_by(user_id=uidd).count() > 0)
+
+resp = client.delete("/account", headers=Hd)
+check("DELETE /account 200 qaytardi", resp.status_code == 200, resp.status_code)
+
+dbd2 = SessionLocal()
+check("foydalanuvchi o'chdi",
+      dbd2.query(User).filter_by(id=uidd).first() is None)
+left = {m.__name__: dbd2.query(m).filter(m.user_id == uidd).count()
+        for m in USER_OWNED_MODELS}
+check("unga bog'liq hech narsa qolmadi",
+      all(v == 0 for v in left.values()), left)
+
 # --- Yakun -----------------------------------------------------------------
 print("\n" + "=" * 60)
 if FAIL:

@@ -10,7 +10,18 @@ from google.oauth2 import id_token as google_id_token
 from google.auth.transport import requests as google_requests
 
 from database import get_db
-from models import User, Device, StreakDay, UnitCompletion, UserFavorite, WordComment
+from models import (
+    AiUsage,
+    Device,
+    SpeakingHistory,
+    StreakDay,
+    UnitCompletion,
+    User,
+    UserFavorite,
+    UserWord,
+    WordComment,
+)
+
 from schemes import GoogleAuthModel, AppleAuthModel, RefreshModel
 from auth import (
     create_access_token,
@@ -19,6 +30,24 @@ from auth import (
     revoke_refresh_token,
     revoke_all_refresh_tokens,
     get_current_user,
+)
+
+# Foydalanuvchiga TEGISHLI barcha jadvallar. Hisob o'chirilganda hammasi
+# tozalanishi SHART: ular `users.id` ga ForeignKey bilan bog'langan va
+# qolib ketsa Postgres foydalanuvchini o'chirishga ruxsat bermaydi
+# (IntegrityError -> 500). SQLite'da esa xato bermay, yetim qatorlar qoladi.
+#
+# YANGI jadval qo'shsangiz shu ro'yxatga ham qo'shing —
+# `test_srs_flow.py` buni avtomatik tekshiradi.
+USER_OWNED_MODELS = (
+    Device,
+    StreakDay,
+    UnitCompletion,
+    UserFavorite,
+    WordComment,
+    AiUsage,
+    SpeakingHistory,
+    UserWord,
 )
 
 auth_router = APIRouter(prefix='/auth')
@@ -242,13 +271,11 @@ account_router = APIRouter(prefix='/account')
 def delete_account(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     """Joriy foydalanuvchini va unga bog'liq barcha ma'lumotlarni o'chiradi.
 
-    Bu amalni qaytarib bo'lmaydi: profil, streak kunlari, unit tugatishlari
-    va push qurilmalari butunlay o'chadi."""
-    db.query(Device).filter(Device.user_id == user.id).delete()
-    db.query(StreakDay).filter(StreakDay.user_id == user.id).delete()
-    db.query(UnitCompletion).filter(UnitCompletion.user_id == user.id).delete()
-    db.query(UserFavorite).filter(UserFavorite.user_id == user.id).delete()
-    db.query(WordComment).filter(WordComment.user_id == user.id).delete()
+    Bu amalni qaytarib bo'lmaydi: profil, o'rganish tarixi, streak kunlari,
+    AI suhbatlari va push qurilmalari butunlay o'chadi."""
+    for model in USER_OWNED_MODELS:
+        db.query(model).filter(model.user_id == user.id).delete(
+            synchronize_session=False)
     revoke_all_refresh_tokens(user.id, db)
     db.delete(user)
     db.commit()
