@@ -391,7 +391,10 @@ def _record_active_uses(db: Session, user_id: int, used_words, all_words) -> lis
     if not used_words:
         return []
 
-    wanted = {srs.normalize(w) for w in used_words if w}
+    # Gemini javobi kutilmagan turda kelishi mumkin — `str()` bilan
+    # himoyalaymiz, aks holda `.strip()` istisno otib butun suhbat
+    # endpointini 500 qilardi.
+    wanted = {srs.normalize(str(w)) for w in used_words if w}
     matched = [w for w in all_words if srs.normalize(w.word_en) in wanted]
     if not matched:
         return []
@@ -480,7 +483,12 @@ def speaking_chat(
 
     # 5.2) Suhbatda erkin ishlatilgan so'zlarni qayd etamiz (statistika).
     used_by_user = result.get("target_words_used_by_user", []) or []
-    used_ids = _record_active_uses(db, user.id, used_by_user, words)
+    try:
+        used_ids = _record_active_uses(db, user.id, used_by_user, words)
+    except Exception:
+        # Statistika suhbatni BUZMASLIGI kerak — bu yordamchi ma'lumot.
+        db.rollback()
+        used_ids = []
 
     # 6) Javob (Gemini natijasi + tarif/vaqt meta)
     data = {
