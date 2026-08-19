@@ -30,6 +30,11 @@ class User(Base):
     longest_streak = Column(Integer, default=0)
     last_active_date = Column(String, nullable=True)  # local sana, ISO "YYYY-MM-DD"
 
+    # Streak muzlatgichi (streak freeze) — o'tkazib yuborilgan kunни "yopib"
+    # streakni saqlaydi. Reklama (rewarded ad) ko'rib topiladi. Mavjud bazaga
+    # `_ensure_schema` (main.py) qo'shadi.
+    streak_freezes = Column(Integer, default=0)
+
     # AI Speaking tarifi. "free" | "pro" | "premium". Kunlik vaqt limiti shunга
     # qarab beriladi (TIER_DAILY_SECONDS). tier_expires_at — oylik obuna tugash
     # sanasi (None = bepul/cheksiz). Tugagach avtomatik "free"ga qaytadi.
@@ -57,6 +62,24 @@ class StreakDay(Base):
     __table_args__ = (
         UniqueConstraint('user_id', 'local_date', name='uq_user_localdate'),
     )
+
+
+class StreakFreezeLog(Base):
+    """Streak muzlatgichi topilgan har bir hodisa (reklama ko'rildi).
+
+    Vazifasi ikkita: (1) kuniga nechta muzlatgich topilganini cheklab, buzuq
+    client cheksiz muzlatgich "yasash"ining oldini olish (rate-limit); (2)
+    audit izi. Bu YANGI jadval — `create_all` uni avtomatik yaratadi.
+
+    ESLATMA: bu MVP darajasidagi himoya. Ishlab chiqarishда reklamani AdMob
+    Server-Side Verification (SSV) callback'i orqali tasdiqlash tavsiya etiladi.
+    """
+    __tablename__ = 'streak_freeze_logs'
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey('users.id'), index=True)
+    local_date = Column(String, index=True)   # "YYYY-MM-DD" (client local)
+    source = Column(String, default="rewarded_ad")
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
 class UnitCompletion(Base):

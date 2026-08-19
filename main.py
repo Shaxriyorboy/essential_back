@@ -9,6 +9,7 @@ from stats_routes import stats_router
 from data_routes import data_router
 from progress_routes import progress_router
 from review_routes import review_router
+from streak_routes import streak_router
 from device_routes import device_router
 from speaking_routes import speaking_router
 from telegram_routes import telegram_router, ensure_webhook
@@ -36,6 +37,9 @@ def _ensure_schema():
                 "ALTER TABLE users ADD COLUMN IF NOT EXISTS tier VARCHAR DEFAULT 'free'"))
             conn.execute(text(
                 "ALTER TABLE users ADD COLUMN IF NOT EXISTS tier_expires_at TIMESTAMP"))
+            # Streak muzlatgichi hisobi
+            conn.execute(text(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS streak_freezes INTEGER DEFAULT 0"))
             # AI kunlik vaqt hisobi (ai_usage jadvali mavjud bo'lsa)
             conn.execute(text(
                 "ALTER TABLE ai_usage ADD COLUMN IF NOT EXISTS seconds_used INTEGER DEFAULT 0"))
@@ -51,6 +55,8 @@ def _ensure_schema():
                 conn.execute(text("ALTER TABLE users ADD COLUMN tier VARCHAR DEFAULT 'free'"))
             if "tier_expires_at" not in ucols:
                 conn.execute(text("ALTER TABLE users ADD COLUMN tier_expires_at TIMESTAMP"))
+            if "streak_freezes" not in ucols:
+                conn.execute(text("ALTER TABLE users ADD COLUMN streak_freezes INTEGER DEFAULT 0"))
             acols = [r[1] for r in conn.execute(text("PRAGMA table_info(ai_usage)"))]
             if acols and "seconds_used" not in acols:
                 conn.execute(text("ALTER TABLE ai_usage ADD COLUMN seconds_used INTEGER DEFAULT 0"))
@@ -79,6 +85,7 @@ app.include_router(stats_router)
 app.include_router(data_router)
 app.include_router(progress_router)
 app.include_router(review_router)
+app.include_router(streak_router)
 app.include_router(device_router)
 app.include_router(speaking_router)
 app.include_router(account_router)

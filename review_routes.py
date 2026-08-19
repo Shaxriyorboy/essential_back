@@ -474,8 +474,10 @@ def submit_reviews(
             "streak": {
                 "current_streak": user.current_streak or 0,
                 "longest_streak": user.longest_streak or 0,
+                "streak_freezes": user.streak_freezes or 0,
                 "last_active_date": user.last_active_date,
                 "increased": False,
+                "freeze_used": False,
             },
         })
 
@@ -604,8 +606,10 @@ def submit_reviews(
     streak = {
         "current_streak": user.current_streak or 0,
         "longest_streak": user.longest_streak or 0,
+        "streak_freezes": user.streak_freezes or 0,
         "last_active_date": user.last_active_date,
         "increased": False,
+        "freeze_used": False,
     }
     if goal_met:
         streak = close_day(db, user, body.local_date, "review", score)
@@ -736,4 +740,5 @@ def get_stats(
         "active_words": active_words,
         "current_streak": user.current_streak or 0,
         "longest_streak": user.longest_streak or 0,
+        "streak_freezes": user.streak_freezes or 0,
     })

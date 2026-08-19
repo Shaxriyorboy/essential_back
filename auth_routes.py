@@ -15,6 +15,7 @@ from models import (
     Device,
     SpeakingHistory,
     StreakDay,
+    StreakFreezeLog,
     UnitCompletion,
     User,
     UserFavorite,
@@ -42,6 +43,7 @@ from auth import (
 USER_OWNED_MODELS = (
     Device,
     StreakDay,
+    StreakFreezeLog,
     UnitCompletion,
     UserFavorite,
     WordComment,
