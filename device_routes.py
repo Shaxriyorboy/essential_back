@@ -8,23 +8,72 @@ except ImportError:  # pragma: no cover
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from fastapi.encoders import jsonable_encoder
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from auth import get_current_user
 from database import get_db
-from models import Device, User
+from models import Device, User, UserWord
 from schemes import DeviceRegisterModel, DeviceUnregisterModel
 import push
 
 device_router = APIRouter(prefix='/devices')
 
-# Eslatma matni — ilovadagi lokal eslatma bilan mosroq.
-REMINDER_TITLE = "Streakingni yo'qotma! 🔥"
-REMINDER_BODY = (
-    "Bugun hali mashq qilmading. Bir necha so'z o'rganib streakingni saqlab qol!"
-)
 # Cron har soat chaqiradi — push faqat shu mahalliy soat(lar)da yuboriladi.
 DEFAULT_REMINDER_HOURS = {11, 16, 19}
+
+
+def _due_reviews_count(db: Session, user_id: int, local_date: str) -> int:
+    """Bugungi muddati kelgan takrorlashlar soni."""
+    return (
+        db.query(func.count(UserWord.id))
+        .filter(UserWord.user_id == user_id,
+                UserWord.due_date.isnot(None),
+                UserWord.due_date <= local_date)
+        .scalar()
+    ) or 0
+
+
+def _build_reminder(db: Session, user: User, local_date: str):
+    """Foydalanuvchi HOLATIGA qarab eslatma matnini tuzadi.
+
+    Qaytadi: (title, body, type) yoki None (bugun faol — eslatma shart emas).
+
+    Aqlli tanlov (muhimlik bo'yicha):
+      1. Streak xavf ostida (eng kuchli motivatsiya — yo'qotish qo'rquvi).
+         Muzlatgich bo'lsa xabar yumshoqroq (streak baribir saqlanadi).
+      2. Muddati kelgan takrorlash bor — aniq son bilan.
+      3. Hech qanday streak/ish yo'q — yumshoq "boshlang" chaqirig'i.
+    """
+    if user.last_active_date == local_date:
+        return None  # bugun allaqachon faol
+
+    streak = user.current_streak or 0
+    freezes = user.streak_freezes or 0
+
+    if streak >= 1:
+        title = f"🔥 {streak} kunlik seriya xavf ostida"
+        if freezes > 0:
+            body = ("Bugun mashq qilmasangiz muzlatgich sarflanadi. "
+                    "Atigi 5 daqiqa — seriyangizni bejiz sarflamang!")
+        else:
+            body = ("Bugun mashq qilmasangiz seriyangiz uziladi. "
+                    "Atigi 5 daqiqa bas!")
+        return (title, body, "streak_reminder")
+
+    due = _due_reviews_count(db, user.id, local_date)
+    if due > 0:
+        return (
+            f"📚 {due} ta so'z takrorlashga tayyor",
+            "Bir necha daqiqa mashq qilib xotirangizda mustahkamlang.",
+            "review_due",
+        )
+
+    return (
+        "Bugun o'rganishni boshlang ✨",
+        "Bir necha yangi so'z sizni kutmoqda — 5 daqiqa yetarli!",
+        "learn_new",
+    )
 
 
 @device_router.post('')
@@ -140,13 +189,15 @@ def send_reminders(
         if user is None:
             continue
 
-        # Bugun allaqachon faol bo'lsa — eslatma shart emas
-        if user.last_active_date == local_date:
+        # Holatga qarab aqlli eslatma tuzamiz. None — bugun faol, shart emas.
+        reminder = _build_reminder(db, user, local_date)
+        if reminder is None:
             skipped += 1
             continue
+        title, body, rtype = reminder
 
         ok, unregistered = push.send_to_token(
-            device.token, REMINDER_TITLE, REMINDER_BODY, data={"type": "streak_reminder"}
+            device.token, title, body, data={"type": rtype}
         )
         if ok:
             sent += 1
