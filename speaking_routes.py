@@ -23,7 +23,7 @@ from fastapi import Header
 
 from auth import get_current_user
 from database import get_db
-from gemini import GeminiError, generate_chat
+from llm import LLMError, generate_chat
 import srs
 from models import AiUsage, Book, SpeakingHistory, Unit, User, UserFavorite, Word, UserWord
 from schemes import SpeakingChatModel, SpeakingConsumeModel
@@ -459,10 +459,10 @@ def speaking_chat(
     system = _build_system_instruction(user, level, native, label, words)
     contents = _build_contents(payload.messages)
 
-    # 4) Gemini (tarifga mos model bilan)
+    # 4) LLM (Azure OpenAI yoki Gemini — env bilan tanlanadi)
     try:
         result = generate_chat(system, contents, preferred_model=model_for(user))
-    except GeminiError as e:
+    except LLMError as e:
         raise HTTPException(status_code=502, detail=f"AI xizmati xatosi: {e}")
 
     # 5) Faqat MUVAFFAQIYATLI javobdan keyin vaqt + hisoblagichni yangilaymiz.

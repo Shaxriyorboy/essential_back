@@ -182,11 +182,11 @@ check("token yo'q bo'lsa 401", rn.status_code == 401, rn.status_code)
 
 # --- 7. Gemini xatosi (502) ------------------------------------------------
 print("\n7) Gemini xatosi bo'lganda 502 + vaqt sarflanmaydi")
-from gemini import GeminiError
+from llm import LLMError
 
 
 def failing_generate(*a, **k):
-    raise GeminiError("high demand")
+    raise LLMError("high demand")
 
 
 speaking_routes.generate_chat = failing_generate
